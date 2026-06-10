@@ -1,126 +1,47 @@
 import * as THREE from "three";
+import { Tree } from "@dgreenheck/ez-tree";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { HALF, WATER_Y } from "../Core/Heightfield.js";
 import { Mulberry } from "../Core/Rng.js";
-import {
-  grassBladeTexture,
-  barkTexture,
-  leafCardTexture,
-  pineCardTexture,
-} from "../Engine/Textures.js";
+import { fluffyTuftTexture, softNoiseTexture } from "../Engine/Textures.js";
 
 const TREE_TRIES = 2600;
+const TREE_CELL = 6;
 const SHRUB_COUNT = 280;
 const GRASS_TILE = 64;
 const GRASS_COUNT = 16000;
 
-// --- geometry builders ---
+// ez-tree presets, detail-reduced to an instancing budget (~4-5k tris/tree)
+const PINE_SPECS = [
+  { preset: "Pine Small", seed: 101 },
+  { preset: "Pine Medium", seed: 202 },
+  { preset: "Pine Medium", seed: 303 },
+];
+const OAK_SPECS = [
+  { preset: "Oak Small", seed: 404 },
+  { preset: "Ash Small", seed: 505 },
+  { preset: "Oak Small", seed: 606 },
+];
 
-function cardGeo(positions) {
-  // positions: [{x,y,z, ry, rx, s}] -> merged outward-facing quads
-  const quads = [];
-  const m = new THREE.Matrix4();
-  const r = new THREE.Matrix4();
-  for (const p of positions) {
-    const q = new THREE.PlaneGeometry(p.s, p.s);
-    m.makeTranslation(p.x, p.y, p.z);
-    r.makeRotationY(p.ry);
-    m.multiply(r);
-    r.makeRotationX(p.rx);
-    m.multiply(r);
-    q.applyMatrix4(m);
-    quads.push(q);
-  }
-  return mergeGeometries(quads);
-}
-
-// soft "volume" shading: normals point away from the canopy axis
-function radializeNormals(geo, centerYBias) {
-  const pos = geo.attributes.position;
-  const nor = geo.attributes.normal;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    v.set(pos.getX(i), pos.getY(i), pos.getZ(i));
-    v.y -= v.y * centerYBias - 0.6;
-    v.normalize();
-    nor.setXYZ(i, v.x, Math.abs(v.y) * 0.6 + 0.25, v.z);
-  }
-  nor.needsUpdate = true;
-  return geo;
-}
-
-function pineCoreGeo() {
-  return mergeGeometries([
-    new THREE.ConeGeometry(1.2, 2.6, 7).translate(0, 2.7, 0),
-    new THREE.ConeGeometry(0.8, 2, 7).translate(0, 4.1, 0),
-  ]);
-}
-
-function pineCardsGeo(rng) {
-  const cards = [];
-  const tiers = [
-    [2.5, 1.15, 5, 2.1],
-    [3.6, 0.9, 4, 1.8],
-    [4.7, 0.55, 3, 1.4],
-  ];
-  for (const [y, rad, n, size] of tiers) {
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + rng();
-      cards.push({
-        x: Math.cos(a) * rad * 0.55,
-        y,
-        z: Math.sin(a) * rad * 0.55,
-        ry: -a + Math.PI / 2,
-        rx: -0.85 - rng() * 0.25,
-        s: size,
-      });
-    }
-  }
-  return radializeNormals(cardGeo(cards), 0.8);
-}
-
-function oakCoreGeo() {
-  return mergeGeometries([
-    new THREE.IcosahedronGeometry(1.35, 1)
-      .scale(1, 0.8, 1)
-      .translate(0, 3.6, 0),
-    new THREE.IcosahedronGeometry(0.85, 1).translate(1, 3, 0.3),
-  ]);
-}
-
-function oakCardsGeo(rng) {
-  const cards = [];
-  const c = new THREE.Vector3(0, 3.55, 0);
-  for (let i = 0; i < 10; i++) {
-    const a = rng() * Math.PI * 2;
-    const elev = (rng() - 0.35) * 1.4;
-    const dir = new THREE.Vector3(
-      Math.cos(a) * Math.cos(elev),
-      Math.sin(elev),
-      Math.sin(a) * Math.cos(elev),
-    );
-    const p = dir
-      .clone()
-      .multiplyScalar(1.35 + rng() * 0.5)
-      .add(c);
-    cards.push({
-      x: p.x,
-      y: p.y,
-      z: p.z,
-      ry: -a + Math.PI / 2,
-      rx: -elev + (rng() - 0.5) * 0.6,
-      s: 1.9 + rng() * 0.7,
-    });
-  }
-  const geo = cardGeo(cards);
-  const pos = geo.attributes.position;
-  const nor = geo.attributes.normal;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    v.set(pos.getX(i) - c.x, pos.getY(i) - c.y, pos.getZ(i) - c.z).normalize();
-    nor.setXYZ(i, v.x, v.y * 0.7 + 0.3, v.z);
-  }
-  return geo;
+function buildVariant(spec) {
+  const t = new Tree();
+  t.loadPreset(spec.preset);
+  const o = t.options;
+  o.seed = spec.seed;
+  o.branch.sections = { 0: 5, 1: 4, 2: 3, 3: 2 };
+  o.branch.segments = { 0: 5, 1: 4, 2: 3, 3: 3 };
+  o.leaves.count = Math.min(o.leaves.count, 10);
+  o.leaves.size *= 1.8;
+  t.generate();
+  t.branchesMesh.geometry.computeBoundingBox();
+  return {
+    branchGeo: t.branchesMesh.geometry,
+    branchSrcMat: t.branchesMesh.material,
+    leafGeo: t.leavesMesh.geometry,
+    leafSrcMat: t.leavesMesh.material,
+    height: t.branchesMesh.geometry.boundingBox.max.y,
+    baseRadius: o.branch.radius[0],
+  };
 }
 
 export function createVegetation(hf, heightTex) {
@@ -128,6 +49,7 @@ export function createVegetation(hf, heightTex) {
   const group = new THREE.Group();
   const trunkColliders = [];
   const m = new THREE.Matrix4();
+  const v = new THREE.Vector3();
   const col = new THREE.Color();
   const uTime = { value: 0 };
   const uCamPos = { value: new THREE.Vector3() };
@@ -135,14 +57,14 @@ export function createVegetation(hf, heightTex) {
   const clearOfSites = (x, z, pad) =>
     hf.sites.every((s) => (s.x - x) ** 2 + (s.z - z) ** 2 > pad * pad);
 
-  // --- tree placement (unchanged rules -> same colliders) ---
+  // --- tree placement ---
   const pines = [];
   const oaks = [];
   const cells = new Set();
   for (let i = 0; i < TREE_TRIES; i++) {
     const x = (rng() * 2 - 1) * (HALF - 12);
     const z = (rng() * 2 - 1) * (HALF - 12);
-    const key = `${(x / 5) | 0},${(z / 5) | 0}`;
+    const key = `${(x / TREE_CELL) | 0},${(z / TREE_CELL) | 0}`;
     if (cells.has(key)) continue;
     const y = hf.heightAt(x, z);
     if (y < WATER_Y + 0.8) continue;
@@ -153,7 +75,8 @@ export function createVegetation(hf, heightTex) {
     (rng() < 0.55 ? pines : oaks).push({ x, y, z, s: 0.75 + rng() * 0.75 });
   }
 
-  const windSway = (mat, amp) => {
+  // tree-local sway, instancing-safe (ez-tree's built-in wind drops instanceMatrix)
+  const treeSway = (mat, H) => {
     mat.onBeforeCompile = (s) => {
       s.uniforms.uTime = uTime;
       s.vertexShader = s.vertexShader
@@ -162,128 +85,119 @@ export function createVegetation(hf, heightTex) {
           "#include <begin_vertex>",
           `#include <begin_vertex>
           float wPh = instanceMatrix[3][0] * 0.31 + instanceMatrix[3][2] * 0.27;
-          float wAt = smoothstep( 1.6, 4.5, transformed.y );
-          transformed.x += sin( uTime * 0.7 + wPh ) * wAt * ${amp};
-          transformed.z += cos( uTime * 0.53 + wPh * 1.3 ) * wAt * ${amp} * 0.7;`,
+          float wAt = smoothstep( ${(H * 0.25).toFixed(1)}, ${(H * 0.95).toFixed(1)}, transformed.y );
+          transformed.x += ( sin( uTime * 0.6 + wPh ) + 0.4 * sin( uTime * 1.7 + wPh * 1.7 ) ) * wAt * ${(H * 0.008).toFixed(2)};
+          transformed.z += cos( uTime * 0.47 + wPh * 1.3 ) * wAt * ${(H * 0.006).toFixed(2)};`,
         );
     };
   };
 
-  const trunkMat = new THREE.MeshStandardMaterial({
-    map: barkTexture(hf.seed),
-    roughness: 1,
-  });
-  const coreMat = new THREE.MeshStandardMaterial({ roughness: 1 });
-  const pineCardMat = new THREE.MeshStandardMaterial({
-    map: pineCardTexture(hf.seed),
-    alphaTest: 0.38,
-    side: THREE.DoubleSide,
-    roughness: 1,
-  });
-  const oakCardMat = new THREE.MeshStandardMaterial({
-    map: leafCardTexture(hf.seed),
-    alphaTest: 0.38,
-    side: THREE.DoubleSide,
-    roughness: 1,
-  });
-  windSway(pineCardMat, 0.07);
-  windSway(oakCardMat, 0.09);
+  const addTreeVariant = (spec, items, heightOf) => {
+    if (!items.length) return;
+    const variant = buildVariant(spec);
+    const barkMat = new THREE.MeshStandardMaterial({
+      map: variant.branchSrcMat.map,
+      normalMap: variant.branchSrcMat.normalMap,
+      aoMap: variant.branchSrcMat.aoMap,
+      roughness: 1,
+    });
+    const leafMat = new THREE.MeshStandardMaterial({
+      map: variant.leafSrcMat.map,
+      color: variant.leafSrcMat.color,
+      alphaTest: 0.4,
+      side: THREE.DoubleSide,
+      roughness: 1,
+    });
+    treeSway(leafMat, variant.height);
 
-  const cardDepth = (map) =>
-    new THREE.MeshDepthMaterial({
+    const branches = new THREE.InstancedMesh(
+      variant.branchGeo,
+      barkMat,
+      items.length,
+    );
+    const leaves = new THREE.InstancedMesh(
+      variant.leafGeo,
+      leafMat,
+      items.length,
+    );
+    leaves.customDepthMaterial = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
-      map,
-      alphaTest: 0.38,
+      map: leafMat.map,
+      alphaTest: 0.4,
     });
-
-  const addInstanced = (geo, mat, items, tint, depthMap) => {
-    const mesh = new THREE.InstancedMesh(geo, mat, items.length);
-    const v = new THREE.Vector3();
     items.forEach((t, i) => {
-      const r = Mulberry(i * 7 + hf.seed);
+      const r = Mulberry(i * 7 + hf.seed + spec.seed);
+      const targetH = heightOf(t.s);
+      const sc = targetH / variant.height;
       m.makeRotationY(r() * Math.PI * 2);
-      m.scale(v.set(t.s, t.s * (0.9 + r() * 0.25), t.s));
-      m.setPosition(t.x, t.y - 0.15, t.z);
-      mesh.setMatrixAt(i, m);
-      if (tint) mesh.setColorAt(i, tint(Mulberry(i * 13 + hf.seed + 5), col));
+      m.scale(v.set(sc, sc * (0.92 + r() * 0.16), sc));
+      m.setPosition(t.x, t.y - 0.1, t.z);
+      branches.setMatrixAt(i, m);
+      leaves.setMatrixAt(i, m);
+      const g = 0.95 + r() * 0.3;
+      leaves.setColorAt(i, col.setRGB(g * (0.95 + r() * 0.1), g, g * 0.9));
+      trunkColliders.push({
+        x: t.x,
+        z: t.z,
+        r: variant.baseRadius * sc + 0.15,
+        topY: t.y + targetH * 0.55,
+      });
     });
-    if (depthMap) mesh.customDepthMaterial = cardDepth(depthMap);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-    return mesh;
+    for (const mesh of [branches, leaves]) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
   };
 
-  const barkTint = (r, c) =>
-    c.setHSL(0.07 + r() * 0.03, 0.25 + r() * 0.1, 0.34 + r() * 0.14);
-  const pineCoreTint = (r, c) =>
-    c.setHSL(0.31 + r() * 0.04, 0.32, 0.21 + r() * 0.06);
-  const pineCardTint = (r, c) =>
-    c.setHSL(0.3 + r() * 0.05, 0.45, 0.5 + r() * 0.2);
-  const oakCoreTint = (r, c) =>
-    c.setHSL(0.25 + r() * 0.04, 0.35, 0.24 + r() * 0.06);
-  const oakCardTint = (r, c) =>
-    c.setHSL(0.22 + r() * 0.07, 0.48, 0.52 + r() * 0.2);
-
-  const geoRng = Mulberry(hf.seed + 77);
-  addInstanced(
-    new THREE.CylinderGeometry(0.14, 0.3, 2.7, 7).translate(0, 1.35, 0),
-    trunkMat,
-    pines,
-    barkTint,
+  PINE_SPECS.forEach((spec, k) =>
+    addTreeVariant(
+      spec,
+      pines.filter((_, i) => i % 3 === k),
+      (s) => 6.5 + s * 4,
+    ),
   );
-  addInstanced(pineCoreGeo(), coreMat, pines, pineCoreTint);
-  addInstanced(
-    pineCardsGeo(geoRng),
-    pineCardMat,
-    pines,
-    pineCardTint,
-    pineCardMat.map,
-  );
-  addInstanced(
-    new THREE.CylinderGeometry(0.2, 0.36, 3, 7).translate(0, 1.5, 0),
-    trunkMat,
-    oaks,
-    barkTint,
-  );
-  addInstanced(oakCoreGeo(), coreMat, oaks, oakCoreTint);
-  addInstanced(
-    oakCardsGeo(geoRng),
-    oakCardMat,
-    oaks,
-    oakCardTint,
-    oakCardMat.map,
+  OAK_SPECS.forEach((spec, k) =>
+    addTreeVariant(
+      spec,
+      oaks.filter((_, i) => i % 3 === k),
+      (s) => 5 + s * 3,
+    ),
   );
 
-  for (const t of [...pines, ...oaks]) {
-    trunkColliders.push({
-      x: t.x,
-      z: t.z,
-      r: 0.4 * t.s + 0.1,
-      topY: t.y + 3 * t.s,
-    });
-  }
-
-  // --- near-field grass: instances wrap toroidally around the camera ---
-  const quad = new THREE.PlaneGeometry(1, 0.75).translate(0, 0.34, 0);
+  // --- FluffyGrass-style near-field grass on the camera-wrap system ---
+  const quad = new THREE.PlaneGeometry(1.1, 0.95).translate(0, 0.43, 0);
   const grassGeo = mergeGeometries([quad, quad.clone().rotateY(Math.PI / 2)]);
+  {
+    // flat up normals: the field shades like a soft carpet
+    const nor = grassGeo.attributes.normal;
+    for (let i = 0; i < nor.count; i++) nor.setXYZ(i, 0, 1, 0);
+  }
   const grassMat = new THREE.MeshStandardMaterial({
-    map: grassBladeTexture(),
-    alphaTest: 0.4,
+    map: fluffyTuftTexture(),
+    alphaTest: 0.42,
     side: THREE.DoubleSide,
     roughness: 1,
   });
   grassMat.onBeforeCompile = (s) => {
-    s.uniforms.uTime = uTime;
-    s.uniforms.uCamPos = uCamPos;
-    s.uniforms.uHeightTex = { value: heightTex };
+    Object.assign(s.uniforms, {
+      uTime,
+      uCamPos,
+      uHeightTex: { value: heightTex },
+      uNoise: { value: softNoiseTexture(hf.seed) },
+      uBase: { value: new THREE.Color(0x36481c) },
+      uTip1: { value: new THREE.Color(0xa6dd96) },
+      uTip2: { value: new THREE.Color(0x3c6336) },
+    });
     s.vertexShader = s.vertexShader
       .replace(
         "#include <common>",
         `#include <common>
         uniform float uTime;
         uniform vec3 uCamPos;
-        uniform sampler2D uHeightTex;`,
+        uniform sampler2D uHeightTex;
+        uniform sampler2D uNoise;
+        varying float vPatch;`,
       )
       .replace(
         "#include <begin_vertex>",
@@ -298,9 +212,11 @@ export function createVegetation(hf, heightTex) {
         gFade *= 1.0 - step( 198.0, max( abs( gWp.x ), abs( gWp.y ) ) );
         transformed = gRs * transformed * gFade;
         float gBend = uv.y * uv.y * gFade;
-        transformed.x += sin( uTime * 1.7 + gWp.x * 0.9 + gWp.y * 0.8 ) * gBend * 0.12;
-        transformed.z += cos( uTime * 1.25 + gWp.x * 0.7 ) * gBend * 0.09;
-        transformed += vec3( gWp.x, gHs.r, gWp.y );`,
+        float gGust = texture2D( uNoise, gWp * 0.011 + uTime * 0.013 ).r - 0.5;
+        transformed.x += ( sin( uTime * 1.6 + gWp.x * 0.9 + gWp.y * 0.8 ) + gGust * 2.6 ) * gBend * 0.13;
+        transformed.z += ( cos( uTime * 1.2 + gWp.x * 0.7 ) + gGust * 2.0 ) * gBend * 0.1;
+        transformed += vec3( gWp.x, gHs.r, gWp.y );
+        vPatch = texture2D( uNoise, gWp * 0.016 ).r;`,
       )
       .replace(
         "#include <project_vertex>",
@@ -313,20 +229,31 @@ export function createVegetation(hf, heightTex) {
           vec4 worldPosition = modelMatrix * vec4( transformed, 1.0 );
         #endif`,
       );
+    s.fragmentShader = s.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+        uniform vec3 uBase;
+        uniform vec3 uTip1;
+        uniform vec3 uTip2;
+        varying float vPatch;`,
+      )
+      .replace(
+        "#include <map_fragment>",
+        `vec4 gTuftTexel = texture2D( map, vMapUv );
+        vec3 gTip = mix( uTip1, uTip2, smoothstep( 0.2, 0.8, vPatch ) );
+        diffuseColor.rgb = mix( uBase, gTip, smoothstep( 0.05, 1.0, vMapUv.y ) ) * gTuftTexel.r;
+        diffuseColor.a = gTuftTexel.a;`,
+      );
   };
 
   const grass = new THREE.InstancedMesh(grassGeo, grassMat, GRASS_COUNT);
-  const v = new THREE.Vector3();
   for (let i = 0; i < GRASS_COUNT; i++) {
     const s = 0.55 + rng() * 0.75;
     m.makeRotationY(rng() * Math.PI * 2);
     m.scale(v.set(s, s * (0.8 + rng() * 0.5), s));
     m.setPosition((rng() - 0.5) * GRASS_TILE, 0, (rng() - 0.5) * GRASS_TILE);
     grass.setMatrixAt(i, m);
-    grass.setColorAt(
-      i,
-      col.setHSL(0.22 + rng() * 0.07, 0.5, 0.48 + rng() * 0.24),
-    );
   }
   grass.frustumCulled = false;
   grass.receiveShadow = true;

@@ -19,7 +19,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.66;
+renderer.toneMappingExposure = 0.74;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -89,6 +89,7 @@ renderer.setAnimationLoop(() => {
   elapsed += dt;
   if (input.locked) player.update(dt);
   water.update(dt);
+  terrain.update(elapsed);
   veg.update(elapsed, player.pos);
   sky.update(player.pos);
   audio.update(dt, hf.streamDist(player.pos.x, player.pos.z));

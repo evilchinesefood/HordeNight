@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { WORLD_SIZE, WATER_Y } from "../Core/Heightfield.js";
 import { Fbm2 } from "../Core/Noise.js";
-import { groundTextureSet } from "../Engine/Textures.js";
+import { groundTextureSet, causticTexture } from "../Engine/Textures.js";
 
 const RES = 384;
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
@@ -22,6 +22,15 @@ const SPLAT_GLSL = `
             + texture2D( tRock, rUv * 0.23 ).rgb * sw.z;
   alb = mix( alb, alb2, 0.35 );
   diffuseColor.rgb *= alb * vColor;
+
+  // dancing caustics on the streambed (two scrolling reads, min() sharpens)
+  float cWet = smoothstep( 0.05, -0.35, vWy );
+  if ( cWet > 0.0 ) {
+    float ca = texture2D( tCaustic, vNormalMapUv * 110.0 + uTime * vec2( 0.05, 0.07 ) ).r;
+    float cb = texture2D( tCaustic, vNormalMapUv * 86.0 - uTime * vec2( 0.06, 0.035 ) ).r;
+    float cDim = smoothstep( -2.4, -0.5, vWy );
+    diffuseColor.rgb += diffuseColor.rgb * min( ca, cb ) * cWet * ( 0.5 + 1.3 * cDim ) * 2.0;
+  }
 `;
 
 const NORMAL_GLSL = `
@@ -112,6 +121,7 @@ export function createTerrain(hf, anisotropy = 4) {
     roughness: 1,
     metalness: 0,
   });
+  const uTime = { value: 0 };
   mat.onBeforeCompile = (s) => {
     Object.assign(s.uniforms, {
       tGrass: { value: T.grass.map },
@@ -121,22 +131,26 @@ export function createTerrain(hf, anisotropy = 4) {
       tRock: { value: T.rock.map },
       tRockN: { value: T.rock.nor },
       tBreak: { value: T.breakup },
+      tCaustic: { value: causticTexture(hf.seed) },
+      uTime,
     });
     s.vertexShader = s.vertexShader
       .replace(
         "#include <common>",
-        "#include <common>\nattribute vec3 splat;\nvarying vec3 vSplat;",
+        "#include <common>\nattribute vec3 splat;\nvarying vec3 vSplat;\nvarying float vWy;",
       )
       .replace(
         "#include <begin_vertex>",
-        "#include <begin_vertex>\nvSplat = splat;",
+        "#include <begin_vertex>\nvSplat = splat;\nvWy = transformed.y;",
       );
     s.fragmentShader = s.fragmentShader
       .replace(
         "#include <common>",
         `#include <common>
-        uniform sampler2D tGrass, tGrassN, tDirt, tDirtN, tRock, tRockN, tBreak;
-        varying vec3 vSplat;`,
+        uniform sampler2D tGrass, tGrassN, tDirt, tDirtN, tRock, tRockN, tBreak, tCaustic;
+        uniform float uTime;
+        varying vec3 vSplat;
+        varying float vWy;`,
       )
       .replace("#include <color_fragment>", SPLAT_GLSL)
       .replace("#include <normal_fragment_maps>", NORMAL_GLSL)
@@ -148,5 +162,8 @@ export function createTerrain(hf, anisotropy = 4) {
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
-  return { mesh, heightTex };
+  const update = (t) => {
+    uTime.value = t;
+  };
+  return { mesh, heightTex, update };
 }

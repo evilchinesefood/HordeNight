@@ -36,8 +36,8 @@ export function createSky(scene) {
   scene.add(sun, sun.target);
 
   // cool fill so shadows read blue against the warm sun
-  scene.add(new THREE.HemisphereLight(0xbcd2ee, 0x8a7a58, 0.85));
-  scene.add(new THREE.AmbientLight(0x4e5c78, 0.7));
+  scene.add(new THREE.HemisphereLight(0xbcd2ee, 0x8a7a58, 1.05));
+  scene.add(new THREE.AmbientLight(0x4e5c78, 0.8));
 
   const texel = (SHADOW_SPAN * 2) / SHADOW_RES;
   const update = (target) => {

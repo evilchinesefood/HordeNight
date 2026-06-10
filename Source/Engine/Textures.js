@@ -7,110 +7,35 @@ function canvas(size) {
   return [c, c.getContext("2d")];
 }
 
-// near-white grain multiplied over terrain vertex colors
-export function detailTexture(seed = 1) {
-  const rng = Mulberry(seed);
-  const [c, ctx] = canvas(256);
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, 256, 256);
-  const img = ctx.getImageData(0, 0, 256, 256);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const v = 235 + rng() * 20;
-    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(90, 90);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-export function grassBladeTexture() {
-  const S = 128;
+// FluffyGrass-style tuft: fat tapered blades, grayscale shading in rgb,
+// color comes from the base->tip ramp in the grass shader
+export function fluffyTuftTexture() {
+  const S = 256;
   const [c, ctx] = canvas(S);
   ctx.clearRect(0, 0, S, S);
   const rng = Mulberry(42);
-  for (let i = 0; i < 26; i++) {
-    const x = 6 + rng() * (S - 12);
-    const w = 2 + rng() * 3;
-    const h = 50 + rng() * 70;
-    const lean = (rng() - 0.5) * 30;
-    const g = 125 + rng() * 75;
-    ctx.strokeStyle = `rgb(${g * 0.52},${g},${g * 0.36})`;
-    ctx.lineCap = "round";
-    ctx.lineWidth = w;
+  for (let i = 0; i < 9; i++) {
+    const bx = S * (0.18 + (i / 8) * 0.64) + (rng() - 0.5) * 14;
+    const w = 11 + rng() * 9;
+    const h = S * (0.55 + rng() * 0.42);
+    const lean = (bx - S / 2) * (0.5 + rng() * 0.5) + (rng() - 0.5) * 30;
+    const g = 200 + rng() * 55;
+    ctx.fillStyle = `rgb(${g},${g},${g})`;
     ctx.beginPath();
-    ctx.moveTo(x, S);
-    ctx.quadraticCurveTo(x + lean * 0.4, S - h * 0.6, x + lean, S - h);
-    ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// vertical bark streaks, tiles horizontally around the trunk
-export function barkTexture(seed = 9) {
-  const S = 128;
-  const rng = Mulberry(seed);
-  const [c, ctx] = canvas(S);
-  ctx.fillStyle = "#6b5640";
-  ctx.fillRect(0, 0, S, S);
-  for (let i = 0; i < 70; i++) {
-    const x = rng() * S;
-    const w = 1 + rng() * 3;
-    const dark = rng() < 0.6;
-    ctx.strokeStyle = dark
-      ? `rgba(58,44,30,${0.25 + rng() * 0.3})`
-      : `rgba(140,116,84,${0.2 + rng() * 0.25})`;
-    ctx.lineWidth = w;
-    for (const dx of [-S, 0, S]) {
-      ctx.beginPath();
-      ctx.moveTo(x + dx, -4);
-      ctx.bezierCurveTo(
-        x + dx + (rng() - 0.5) * 10,
-        S * 0.33,
-        x + dx + (rng() - 0.5) * 10,
-        S * 0.66,
-        x + dx + (rng() - 0.5) * 8,
-        S + 4,
-      );
-      ctx.stroke();
-    }
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// irregular cluster of small leaves on transparent bg (oak canopy card)
-export function leafCardTexture(seed = 11) {
-  const S = 128;
-  const rng = Mulberry(seed);
-  const [c, ctx] = canvas(S);
-  ctx.clearRect(0, 0, S, S);
-  const C = S / 2;
-  for (let i = 0; i < 240; i++) {
-    const a = rng() * Math.PI * 2;
-    const d =
-      Math.sqrt(rng()) * (S * 0.46) * (0.75 + 0.25 * Math.sin(a * 3 + seed));
-    const x = C + Math.cos(a) * d;
-    const y = C + Math.sin(a) * d * 0.92;
-    const r = 2.5 + rng() * 4;
-    const g = 95 + rng() * 75;
-    ctx.fillStyle = `rgb(${g * 0.58},${g},${g * 0.42})`;
-    ctx.beginPath();
-    ctx.ellipse(
-      x,
-      y,
-      r,
-      r * (0.6 + rng() * 0.4),
-      rng() * Math.PI,
-      0,
-      Math.PI * 2,
+    ctx.moveTo(bx - w / 2, S);
+    ctx.quadraticCurveTo(
+      bx - w * 0.25 + lean * 0.4,
+      S - h * 0.55,
+      bx + lean,
+      S - h,
     );
+    ctx.quadraticCurveTo(
+      bx + w * 0.25 + lean * 0.4,
+      S - h * 0.55,
+      bx + w / 2,
+      S,
+    );
+    ctx.closePath();
     ctx.fill();
   }
   const tex = new THREE.CanvasTexture(c);
@@ -118,41 +43,38 @@ export function leafCardTexture(seed = 11) {
   return tex;
 }
 
-// drooping needle fan on transparent bg (pine branch card)
-export function pineCardTexture(seed = 13) {
-  const S = 128;
+// wobbly bright cells on black; two scrolling reads min()ed = caustics
+export function causticTexture(seed = 17) {
+  const S = 256;
   const rng = Mulberry(seed);
   const [c, ctx] = canvas(S);
-  ctx.clearRect(0, 0, S, S);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, S, S);
   ctx.lineCap = "round";
-  // central stem
-  ctx.strokeStyle = "#4c3b28";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(S / 2, 4);
-  ctx.lineTo(S / 2, S - 18);
-  ctx.stroke();
-  for (let i = 0; i < 150; i++) {
-    const t = rng();
-    const y = 8 + t * (S - 30);
-    const side = rng() < 0.5 ? -1 : 1;
-    const len = (14 + rng() * 22) * (1 - t * 0.35);
-    const droop = 6 + rng() * 14;
-    const g = 85 + rng() * 65;
-    ctx.strokeStyle = `rgb(${g * 0.5},${g},${g * 0.45})`;
-    ctx.lineWidth = 1.5 + rng() * 1.5;
-    ctx.beginPath();
-    ctx.moveTo(S / 2, y);
-    ctx.quadraticCurveTo(
-      S / 2 + side * len * 0.6,
-      y + droop * 0.3,
-      S / 2 + side * len,
-      y + droop,
-    );
-    ctx.stroke();
+  for (let i = 0; i < 110; i++) {
+    const x = rng() * S;
+    const y = rng() * S;
+    const r = 7 + rng() * 22;
+    const b = 120 + rng() * 135;
+    ctx.strokeStyle = `rgba(${b},${b},${b},${0.3 + rng() * 0.35})`;
+    ctx.lineWidth = 1.5 + rng() * 2.5;
+    for (const dx of [-S, 0, S])
+      for (const dy of [-S, 0, S]) {
+        ctx.beginPath();
+        const segs = 8;
+        for (let sgm = 0; sgm <= segs; sgm++) {
+          const a = (sgm / segs) * Math.PI * 2;
+          const rr = r * (0.8 + 0.3 * Math.sin(a * 3 + i));
+          const px = x + dx + Math.cos(a) * rr;
+          const py = y + dy + Math.sin(a) * rr;
+          sgm === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
   }
   const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
 

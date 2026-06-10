@@ -11,6 +11,7 @@
     "format": "prettier --write \"Source/**/*.js\" \"Tests/**/*.js\" vite.config.js Index.html"
   },
   "dependencies": {
+    "@dgreenheck/ez-tree": "^1.1.0",
     "three": "^0.182.0"
   },
   "devDependencies": {
