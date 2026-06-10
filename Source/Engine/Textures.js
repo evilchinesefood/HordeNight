@@ -27,20 +27,128 @@ export function detailTexture(seed = 1) {
 }
 
 export function grassBladeTexture() {
-  const [c, ctx] = canvas(64);
-  ctx.clearRect(0, 0, 64, 64);
+  const S = 128;
+  const [c, ctx] = canvas(S);
+  ctx.clearRect(0, 0, S, S);
   const rng = Mulberry(42);
-  for (let i = 0; i < 11; i++) {
-    const x = 4 + rng() * 56;
-    const w = 1.5 + rng() * 2;
-    const h = 28 + rng() * 34;
-    const lean = (rng() - 0.5) * 14;
+  for (let i = 0; i < 26; i++) {
+    const x = 6 + rng() * (S - 12);
+    const w = 2 + rng() * 3;
+    const h = 50 + rng() * 70;
+    const lean = (rng() - 0.5) * 30;
     const g = 125 + rng() * 75;
     ctx.strokeStyle = `rgb(${g * 0.52},${g},${g * 0.36})`;
+    ctx.lineCap = "round";
     ctx.lineWidth = w;
     ctx.beginPath();
-    ctx.moveTo(x, 64);
-    ctx.quadraticCurveTo(x + lean * 0.4, 64 - h * 0.6, x + lean, 64 - h);
+    ctx.moveTo(x, S);
+    ctx.quadraticCurveTo(x + lean * 0.4, S - h * 0.6, x + lean, S - h);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// vertical bark streaks, tiles horizontally around the trunk
+export function barkTexture(seed = 9) {
+  const S = 128;
+  const rng = Mulberry(seed);
+  const [c, ctx] = canvas(S);
+  ctx.fillStyle = "#6b5640";
+  ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 70; i++) {
+    const x = rng() * S;
+    const w = 1 + rng() * 3;
+    const dark = rng() < 0.6;
+    ctx.strokeStyle = dark
+      ? `rgba(58,44,30,${0.25 + rng() * 0.3})`
+      : `rgba(140,116,84,${0.2 + rng() * 0.25})`;
+    ctx.lineWidth = w;
+    for (const dx of [-S, 0, S]) {
+      ctx.beginPath();
+      ctx.moveTo(x + dx, -4);
+      ctx.bezierCurveTo(
+        x + dx + (rng() - 0.5) * 10,
+        S * 0.33,
+        x + dx + (rng() - 0.5) * 10,
+        S * 0.66,
+        x + dx + (rng() - 0.5) * 8,
+        S + 4,
+      );
+      ctx.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// irregular cluster of small leaves on transparent bg (oak canopy card)
+export function leafCardTexture(seed = 11) {
+  const S = 128;
+  const rng = Mulberry(seed);
+  const [c, ctx] = canvas(S);
+  ctx.clearRect(0, 0, S, S);
+  const C = S / 2;
+  for (let i = 0; i < 240; i++) {
+    const a = rng() * Math.PI * 2;
+    const d =
+      Math.sqrt(rng()) * (S * 0.46) * (0.75 + 0.25 * Math.sin(a * 3 + seed));
+    const x = C + Math.cos(a) * d;
+    const y = C + Math.sin(a) * d * 0.92;
+    const r = 2.5 + rng() * 4;
+    const g = 95 + rng() * 75;
+    ctx.fillStyle = `rgb(${g * 0.58},${g},${g * 0.42})`;
+    ctx.beginPath();
+    ctx.ellipse(
+      x,
+      y,
+      r,
+      r * (0.6 + rng() * 0.4),
+      rng() * Math.PI,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// drooping needle fan on transparent bg (pine branch card)
+export function pineCardTexture(seed = 13) {
+  const S = 128;
+  const rng = Mulberry(seed);
+  const [c, ctx] = canvas(S);
+  ctx.clearRect(0, 0, S, S);
+  ctx.lineCap = "round";
+  // central stem
+  ctx.strokeStyle = "#4c3b28";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(S / 2, 4);
+  ctx.lineTo(S / 2, S - 18);
+  ctx.stroke();
+  for (let i = 0; i < 150; i++) {
+    const t = rng();
+    const y = 8 + t * (S - 30);
+    const side = rng() < 0.5 ? -1 : 1;
+    const len = (14 + rng() * 22) * (1 - t * 0.35);
+    const droop = 6 + rng() * 14;
+    const g = 85 + rng() * 65;
+    ctx.strokeStyle = `rgb(${g * 0.5},${g},${g * 0.45})`;
+    ctx.lineWidth = 1.5 + rng() * 1.5;
+    ctx.beginPath();
+    ctx.moveTo(S / 2, y);
+    ctx.quadraticCurveTo(
+      S / 2 + side * len * 0.6,
+      y + droop * 0.3,
+      S / 2 + side * len,
+      y + droop,
+    );
     ctx.stroke();
   }
   const tex = new THREE.CanvasTexture(c);

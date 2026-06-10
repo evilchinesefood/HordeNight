@@ -32,12 +32,14 @@ const camera = new THREE.PerspectiveCamera(
 
 const hf = makeHeightfield(SEED);
 const sky = createSky(scene);
-scene.add(
-  createTerrain(hf, Math.min(renderer.capabilities.getMaxAnisotropy(), 8)),
+const terrain = createTerrain(
+  hf,
+  Math.min(renderer.capabilities.getMaxAnisotropy(), 8),
 );
+scene.add(terrain.mesh);
 const water = createWater();
 scene.add(water.mesh);
-const veg = createVegetation(hf);
+const veg = createVegetation(hf, terrain.heightTex);
 scene.add(veg.group);
 const buildings = createBuildings(hf);
 scene.add(buildings.group);
@@ -87,7 +89,7 @@ renderer.setAnimationLoop(() => {
   elapsed += dt;
   if (input.locked) player.update(dt);
   water.update(dt);
-  veg.update(elapsed);
+  veg.update(elapsed, player.pos);
   sky.update(player.pos);
   audio.update(dt, hf.streamDist(player.pos.x, player.pos.z));
   postFx.render();

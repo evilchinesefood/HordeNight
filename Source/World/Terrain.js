@@ -82,6 +82,24 @@ export function createTerrain(hf, anisotropy = 4) {
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geo.setAttribute("splat", new THREE.BufferAttribute(splat, 3));
 
+  // R = terrain height, G = grass density; sampled by the near-field grass shader
+  const HT = RES + 1;
+  const hdata = new Float32Array(HT * HT * 4);
+  for (let i = 0; i < pos.count; i++) {
+    hdata[i * 4] = pos.getY(i);
+    hdata[i * 4 + 1] = splat[i * 3];
+  }
+  const heightTex = new THREE.DataTexture(
+    hdata,
+    HT,
+    HT,
+    THREE.RGBAFormat,
+    THREE.FloatType,
+  );
+  heightTex.minFilter = THREE.LinearFilter;
+  heightTex.magFilter = THREE.LinearFilter;
+  heightTex.needsUpdate = true;
+
   const T = groundTextureSet(hf.seed);
   for (const l of [T.grass, T.dirt, T.rock]) {
     l.map.anisotropy = anisotropy;
@@ -130,5 +148,5 @@ export function createTerrain(hf, anisotropy = 4) {
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
-  return mesh;
+  return { mesh, heightTex };
 }
