@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HordeNight</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0a0d12;
+        font-family: system-ui, sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+      #Overlay {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background: rgba(8, 10, 14, 0.72);
+        color: #e8e4d8;
+        cursor: pointer;
+        user-select: none;
+        z-index: 10;
+        text-align: center;
+      }
+      #Overlay h1 {
+        margin: 0;
+        font-size: 44px;
+        letter-spacing: 6px;
+        font-weight: 700;
+        text-shadow: 0 2px 18px rgba(255, 160, 60, 0.35);
+      }
+      #Overlay p {
+        margin: 0;
+        opacity: 0.85;
+        line-height: 1.7;
+      }
+      #Overlay .Hint {
+        font-size: 13px;
+        opacity: 0.55;
+      }
+      #Overlay.Hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="Overlay">
+      <h1>HORDENIGHT</h1>
+      <p>
+        <b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp;
+        <b>Shift</b> sprint &nbsp;·&nbsp; <b>Space</b> jump
+      </p>
+      <p class="Hint">Click to explore</p>
+    </div>
+    <script type="module" src="/Source/Main.js"></script>
+  </body>
+</html>
