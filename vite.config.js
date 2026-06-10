@@ -18,6 +18,7 @@ const PascalIndex = () => ({
 
 export default defineConfig({
   base: "./",
+  publicDir: "Public",
   plugins: [PascalIndex()],
   build: {
     rollupOptions: { input: "Index.html" },
