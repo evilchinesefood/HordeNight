@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { makeHeightfield } from "./Core/Heightfield.js";
 import { Input } from "./Engine/Input.js";
 import { createSky } from "./Engine/Sky.js";
+import { createPostFx } from "./Engine/PostFx.js";
 import { createTerrain } from "./World/Terrain.js";
 import { createWater } from "./World/Water.js";
 import { createVegetation } from "./World/Vegetation.js";
@@ -38,6 +39,7 @@ scene.add(veg.group);
 const buildings = createBuildings(hf);
 scene.add(buildings.group);
 
+const postFx = createPostFx(renderer, scene, camera);
 const input = new Input(renderer.domElement);
 const audio = new AudioAmbience();
 
@@ -68,6 +70,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  postFx.setSize(window.innerWidth, window.innerHeight);
 });
 
 let last = performance.now();
@@ -82,7 +85,7 @@ renderer.setAnimationLoop(() => {
   veg.update(elapsed);
   sky.update(player.pos);
   audio.update(dt, hf.streamDist(player.pos.x, player.pos.z));
-  renderer.render(scene, camera);
+  postFx.render();
 });
 
 // debug handle for automated smoke tests

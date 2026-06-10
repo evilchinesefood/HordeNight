@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { Sky } from "three/addons/objects/Sky.js";
 
-const SUN_ELEVATION = 16; // low sun -> long shadows
+const SUN_ELEVATION = 14; // low sun -> long shadows
 const SUN_AZIMUTH = 205;
-const SHADOW_SPAN = 55;
+const SHADOW_SPAN = 48;
 const SHADOW_RES = 2048;
 
 export function createSky(scene) {
@@ -23,7 +23,7 @@ export function createSky(scene) {
 
   scene.fog = new THREE.Fog(0xd8cfbe, 80, 380);
 
-  const sun = new THREE.DirectionalLight(0xffe2bd, 2.7);
+  const sun = new THREE.DirectionalLight(0xffd9a6, 3.0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(SHADOW_RES, SHADOW_RES);
   const cam = sun.shadow.camera;
