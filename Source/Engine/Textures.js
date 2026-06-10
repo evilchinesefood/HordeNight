@@ -381,6 +381,31 @@ export function groundTextureSet(seed = 7) {
   return { grass, dirt, rock, breakup: tex(bc, false) };
 }
 
+// blobby tileable gray noise (foam masks etc)
+export function softNoiseTexture(seed = 21) {
+  const S = 128;
+  const rng = Mulberry(seed);
+  const [c, ctx] = canvas(S);
+  ctx.fillStyle = "rgb(128,128,128)";
+  ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 800; i++) {
+    const v = 60 + rng() * 136;
+    wrapDot(
+      ctx,
+      S,
+      rng() * S,
+      rng() * S,
+      2 + rng() * 8,
+      `rgb(${v},${v},${v})`,
+      0.3,
+    );
+  }
+  ctx.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
 // normal map from noise heights for the water surface
 export function waterNormalTexture(seed = 5) {
   const rng = Mulberry(seed);

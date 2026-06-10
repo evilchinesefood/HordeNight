@@ -37,7 +37,7 @@ const terrain = createTerrain(
   Math.min(renderer.capabilities.getMaxAnisotropy(), 8),
 );
 scene.add(terrain.mesh);
-const water = createWater();
+const water = createWater(terrain.heightTex);
 scene.add(water.mesh);
 const veg = createVegetation(hf, terrain.heightTex);
 scene.add(veg.group);
