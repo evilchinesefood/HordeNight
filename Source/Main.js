@@ -7,6 +7,7 @@ import { createTerrain } from "./World/Terrain.js";
 import { createWater } from "./World/Water.js";
 import { createVegetation } from "./World/Vegetation.js";
 import { createBuildings } from "./World/Buildings.js";
+import { createClutter } from "./World/Clutter.js";
 import { AudioAmbience } from "./World/AudioAmbience.js";
 import { Player } from "./Player/Player.js";
 
@@ -31,13 +32,17 @@ const camera = new THREE.PerspectiveCamera(
 
 const hf = makeHeightfield(SEED);
 const sky = createSky(scene);
-scene.add(createTerrain(hf));
+scene.add(
+  createTerrain(hf, Math.min(renderer.capabilities.getMaxAnisotropy(), 8)),
+);
 const water = createWater();
 scene.add(water.mesh);
 const veg = createVegetation(hf);
 scene.add(veg.group);
 const buildings = createBuildings(hf);
 scene.add(buildings.group);
+const clutter = createClutter(hf);
+scene.add(clutter.group);
 
 const postFx = createPostFx(renderer, scene, camera);
 const input = new Input(renderer.domElement);
@@ -55,7 +60,7 @@ const player = new Player(
   input,
   hf,
   buildings.colliders,
-  veg.trunkColliders,
+  [...veg.trunkColliders, ...clutter.circles],
   spawn,
 );
 

@@ -1,24 +1,38 @@
 import * as THREE from "three";
 import { WORLD_SIZE, WATER_Y } from "../Core/Heightfield.js";
 import { Fbm2 } from "../Core/Noise.js";
-import { detailTexture } from "../Engine/Textures.js";
+import { groundTextureSet } from "../Engine/Textures.js";
 
-const RES = 256;
-
-const GRASS_A = [0.36, 0.5, 0.21];
-const GRASS_B = [0.25, 0.4, 0.18];
-const DIRT = [0.43, 0.34, 0.23];
-const ROCK = [0.5, 0.49, 0.47];
-const BED = [0.3, 0.26, 0.2];
-
-const lerp3 = (a, b, t) => [
-  a[0] + (b[0] - a[0]) * t,
-  a[1] + (b[1] - a[1]) * t,
-  a[2] + (b[2] - a[2]) * t,
-];
+const RES = 384;
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
 
-export function createTerrain(hf) {
+const SPLAT_GLSL = `
+  vec2 gUv = vNormalMapUv * 100.0;
+  vec2 dUv = vNormalMapUv * 88.0;
+  vec2 rUv = vNormalMapUv * 56.0;
+  float bn = texture2D( tBreak, vNormalMapUv * 13.0 ).r - 0.5;
+  vec3 sw = clamp( vSplat + bn * 0.55, 0.0, 1.0 );
+  sw = sw * sw * sw;
+  sw /= sw.x + sw.y + sw.z;
+  vec3 alb = texture2D( tGrass, gUv ).rgb * sw.x
+           + texture2D( tDirt, dUv ).rgb * sw.y
+           + texture2D( tRock, rUv ).rgb * sw.z;
+  vec3 alb2 = texture2D( tGrass, gUv * 0.23 ).rgb * sw.x
+            + texture2D( tDirt, dUv * 0.23 ).rgb * sw.y
+            + texture2D( tRock, rUv * 0.23 ).rgb * sw.z;
+  alb = mix( alb, alb2, 0.35 );
+  diffuseColor.rgb *= alb * vColor;
+`;
+
+const NORMAL_GLSL = `
+  vec3 mapN = ( texture2D( tGrassN, gUv ).xyz * sw.x
+              + texture2D( tDirtN, dUv ).xyz * sw.y
+              + texture2D( tRockN, rUv ).xyz * sw.z ) * 2.0 - 1.0;
+  mapN.xy *= normalScale;
+  normal = normalize( tbn * mapN );
+`;
+
+export function createTerrain(hf, anisotropy = 4) {
   const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, RES, RES);
   geo.rotateX(-Math.PI / 2);
 
@@ -29,34 +43,91 @@ export function createTerrain(hf) {
   geo.computeVertexNormals();
 
   const tint = Fbm2(hf.seed + 55);
+  const patches = Fbm2(hf.seed + 56);
   const normal = geo.attributes.normal;
   const colors = new Float32Array(pos.count * 3);
+  const splat = new Float32Array(pos.count * 3); // grass, dirt, rock
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const y = pos.getY(i);
     const z = pos.getZ(i);
     const ny = normal.getY(i);
 
-    let c = lerp3(GRASS_A, GRASS_B, tint(x * 0.03, z * 0.03, 3) * 0.5 + 0.5);
-    if (y > 11) c = lerp3(c, ROCK, clamp01((y - 11) / 6) * 0.6);
-    c = lerp3(c, ROCK, clamp01((0.78 - ny) / 0.2)); // steep slopes
-    if (y < WATER_Y + 0.7)
-      c = lerp3(c, DIRT, clamp01((WATER_Y + 0.7 - y) / 0.7));
-    if (y < WATER_Y) c = lerp3(c, BED, clamp01((WATER_Y - y) / 1.2));
+    let rock = clamp01((0.8 - ny) / 0.16) + clamp01((y - 11) / 7) * 0.5;
+    let dirt =
+      clamp01((WATER_Y + 0.8 - y) / 1.0) +
+      Math.max(0, patches(x * 0.02, z * 0.02, 3) - 0.42) * 1.4;
+    if (y < WATER_Y) dirt += 2;
+    for (const s of hf.sites) {
+      const d = Math.hypot(x - s.x, z - s.z);
+      if (d < 9) dirt += clamp01((9 - d) / 5) * 0.7; // worn ground at buildings
+    }
+    rock = Math.min(rock, 1.5);
+    dirt = Math.min(dirt, 1.5);
+    const grass = Math.max(0, 1 - rock - dirt);
+    const sum = grass + dirt + rock;
+    splat[i * 3] = grass / sum;
+    splat[i * 3 + 1] = dirt / sum;
+    splat[i * 3 + 2] = rock / sum;
 
-    const shade = 0.92 + (tint(x * 0.35, z * 0.35, 2) * 0.5 + 0.5) * 0.16;
-    colors[i * 3] = c[0] * shade;
-    colors[i * 3 + 1] = c[1] * shade;
-    colors[i * 3 + 2] = c[2] * shade;
+    // macro tint only - the texture layers carry the detail
+    const n1 = tint(x * 0.015, z * 0.015, 3);
+    const n2 = tint(x * 0.07, z * 0.07, 2);
+    let b = 0.88 + n1 * 0.18 + n2 * 0.07;
+    if (y < WATER_Y) b *= clamp01(1 + (y - WATER_Y) * 0.35); // darken the bed
+    colors[i * 3] = b * (1 + n1 * 0.05);
+    colors[i * 3 + 1] = b;
+    colors[i * 3 + 2] = b * (1 - n1 * 0.05);
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute("splat", new THREE.BufferAttribute(splat, 3));
+
+  const T = groundTextureSet(hf.seed);
+  for (const l of [T.grass, T.dirt, T.rock]) {
+    l.map.anisotropy = anisotropy;
+    l.nor.anisotropy = anisotropy;
+  }
 
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    map: detailTexture(hf.seed),
+    normalMap: T.grass.nor, // enables the tangent-space normal path; shader blends its own
     roughness: 1,
     metalness: 0,
   });
+  mat.onBeforeCompile = (s) => {
+    Object.assign(s.uniforms, {
+      tGrass: { value: T.grass.map },
+      tGrassN: { value: T.grass.nor },
+      tDirt: { value: T.dirt.map },
+      tDirtN: { value: T.dirt.nor },
+      tRock: { value: T.rock.map },
+      tRockN: { value: T.rock.nor },
+      tBreak: { value: T.breakup },
+    });
+    s.vertexShader = s.vertexShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nattribute vec3 splat;\nvarying vec3 vSplat;",
+      )
+      .replace(
+        "#include <begin_vertex>",
+        "#include <begin_vertex>\nvSplat = splat;",
+      );
+    s.fragmentShader = s.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+        uniform sampler2D tGrass, tGrassN, tDirt, tDirtN, tRock, tRockN, tBreak;
+        varying vec3 vSplat;`,
+      )
+      .replace("#include <color_fragment>", SPLAT_GLSL)
+      .replace("#include <normal_fragment_maps>", NORMAL_GLSL)
+      .replace(
+        "#include <roughnessmap_fragment>",
+        "float roughnessFactor = roughness * dot( sw, vec3( 1.0, 0.99, 0.86 ) );",
+      );
+  };
+
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   return mesh;
