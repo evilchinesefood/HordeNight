@@ -15,7 +15,7 @@ const SEED = 7;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -71,6 +71,31 @@ overlay.addEventListener("click", () => {
   audio.start();
   input.lock();
 });
+let statsHud = null;
+if (location.search.includes("debug")) {
+  overlay.classList.add("Hidden");
+  statsHud = document.createElement("div");
+  statsHud.style.cssText =
+    "position:fixed;top:8px;left:8px;color:#7f7;font:13px monospace;" +
+    "background:rgba(0,0,0,.65);padding:6px 9px;z-index:99;white-space:pre";
+  document.body.appendChild(statsHud);
+  renderer.info.autoReset = false;
+  let frames = 0;
+  let last = performance.now();
+  setInterval(() => {
+    const now = performance.now();
+    const fps = (frames * 1000) / (now - last);
+    frames = 0;
+    last = now;
+    const i = renderer.info;
+    statsHud.textContent =
+      `fps   ${fps.toFixed(0)}\n` +
+      `calls ${i.render.calls}\n` +
+      `tris  ${(i.render.triangles / 1e6).toFixed(2)}M\n` +
+      `tex   ${i.memory.textures} geo ${i.memory.geometries}`;
+  }, 1000);
+  statsHud.tick = () => frames++;
+}
 input.onLockChange = (locked) => overlay.classList.toggle("Hidden", locked);
 
 window.addEventListener("resize", () => {
@@ -93,6 +118,10 @@ renderer.setAnimationLoop(() => {
   veg.update(elapsed, player.pos);
   sky.update(player.pos);
   audio.update(dt, hf.streamDist(player.pos.x, player.pos.z));
+  if (statsHud) {
+    renderer.info.reset();
+    statsHud.tick();
+  }
   postFx.render();
 });
 

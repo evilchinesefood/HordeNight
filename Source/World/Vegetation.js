@@ -6,7 +6,9 @@ import { Mulberry } from "../Core/Rng.js";
 import { fluffyTuftTexture, softNoiseTexture } from "../Engine/Textures.js";
 
 const TREE_TRIES = 2600;
-const TREE_CELL = 6;
+const TREE_CELL = 7;
+const TREE_CAP = 550;
+const CHUNKS = 4; // NxN world grid per variant so camera + shadow frustums can cull
 const SHRUB_COUNT = 280;
 const GRASS_TILE = 64;
 const GRASS_COUNT = 16000;
@@ -28,12 +30,28 @@ function buildVariant(spec) {
   t.loadPreset(spec.preset);
   const o = t.options;
   o.seed = spec.seed;
-  o.branch.sections = { 0: 5, 1: 4, 2: 3, 3: 2 };
-  o.branch.segments = { 0: 5, 1: 4, 2: 3, 3: 3 };
-  o.leaves.count = Math.min(o.leaves.count, 10);
-  o.leaves.size *= 1.8;
+  o.branch.sections = { 0: 4, 1: 3, 2: 2, 3: 2 };
+  o.branch.segments = { 0: 6, 1: 4, 2: 3, 3: 3 };
+  o.leaves.count = Math.min(o.leaves.count, 7);
+  o.leaves.size *= 2.1;
   t.generate();
   t.branchesMesh.geometry.computeBoundingBox();
+  // ez-tree double-billboard leaves share verts between opposing quads, so
+  // computeVertexNormals averages to zero -> NaN lighting on real GPUs.
+  // Radial outward normals fix that and shade the canopy like a volume.
+  {
+    const geo = t.leavesMesh.geometry;
+    const pos = geo.attributes.position;
+    const nor = geo.attributes.normal;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.set(pos.getX(i), pos.getY(i) * 0.25, pos.getZ(i));
+      if (v.lengthSq() < 1e-6) v.set(0, 1, 0);
+      v.normalize();
+      nor.setXYZ(i, v.x, v.y + 0.45, v.z);
+    }
+    nor.needsUpdate = true;
+  }
   return {
     branchGeo: t.branchesMesh.geometry,
     branchSrcMat: t.branchesMesh.material,
@@ -62,6 +80,7 @@ export function createVegetation(hf, heightTex) {
   const oaks = [];
   const cells = new Set();
   for (let i = 0; i < TREE_TRIES; i++) {
+    if (pines.length + oaks.length >= TREE_CAP) break;
     const x = (rng() * 2 - 1) * (HALF - 12);
     const z = (rng() * 2 - 1) * (HALF - 12);
     const key = `${(x / TREE_CELL) | 0},${(z / TREE_CELL) | 0}`;
@@ -110,43 +129,59 @@ export function createVegetation(hf, heightTex) {
     });
     treeSway(leafMat, variant.height);
 
-    const branches = new THREE.InstancedMesh(
-      variant.branchGeo,
-      barkMat,
-      items.length,
-    );
-    const leaves = new THREE.InstancedMesh(
-      variant.leafGeo,
-      leafMat,
-      items.length,
-    );
-    leaves.customDepthMaterial = new THREE.MeshDepthMaterial({
+    const leafDepth = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
       map: leafMat.map,
       alphaTest: 0.4,
     });
+
+    // bucket instances into world-grid chunks so frustum culling works
+    const chunkOf = (t) =>
+      Math.min(CHUNKS - 1, ((t.x + HALF) / ((HALF * 2) / CHUNKS)) | 0) *
+        CHUNKS +
+      Math.min(CHUNKS - 1, ((t.z + HALF) / ((HALF * 2) / CHUNKS)) | 0);
+    const buckets = new Map();
     items.forEach((t, i) => {
-      const r = Mulberry(i * 7 + hf.seed + spec.seed);
-      const targetH = heightOf(t.s);
-      const sc = targetH / variant.height;
-      m.makeRotationY(r() * Math.PI * 2);
-      m.scale(v.set(sc, sc * (0.92 + r() * 0.16), sc));
-      m.setPosition(t.x, t.y - 0.1, t.z);
-      branches.setMatrixAt(i, m);
-      leaves.setMatrixAt(i, m);
-      const g = 0.95 + r() * 0.3;
-      leaves.setColorAt(i, col.setRGB(g * (0.95 + r() * 0.1), g, g * 0.9));
-      trunkColliders.push({
-        x: t.x,
-        z: t.z,
-        r: variant.baseRadius * sc + 0.15,
-        topY: t.y + targetH * 0.55,
-      });
+      const k = chunkOf(t);
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k).push([t, i]);
     });
-    for (const mesh of [branches, leaves]) {
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
+
+    for (const bucket of buckets.values()) {
+      const branches = new THREE.InstancedMesh(
+        variant.branchGeo,
+        barkMat,
+        bucket.length,
+      );
+      const leaves = new THREE.InstancedMesh(
+        variant.leafGeo,
+        leafMat,
+        bucket.length,
+      );
+      leaves.customDepthMaterial = leafDepth;
+      bucket.forEach(([t, i], j) => {
+        const r = Mulberry(i * 7 + hf.seed + spec.seed);
+        const targetH = heightOf(t.s);
+        const sc = targetH / variant.height;
+        m.makeRotationY(r() * Math.PI * 2);
+        m.scale(v.set(sc, sc * (0.92 + r() * 0.16), sc));
+        m.setPosition(t.x, t.y - 0.1, t.z);
+        branches.setMatrixAt(j, m);
+        leaves.setMatrixAt(j, m);
+        const g = 0.95 + r() * 0.3;
+        leaves.setColorAt(j, col.setRGB(g * (0.95 + r() * 0.1), g, g * 0.9));
+        trunkColliders.push({
+          x: t.x,
+          z: t.z,
+          r: variant.baseRadius * sc + 0.15,
+          topY: t.y + targetH * 0.55,
+        });
+      });
+      for (const mesh of [branches, leaves]) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+      }
     }
   };
 

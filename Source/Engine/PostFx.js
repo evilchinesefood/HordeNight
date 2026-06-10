@@ -13,13 +13,16 @@ export function createPostFx(renderer, scene, camera) {
 
   // MSAA on the beauty pass so the composer doesn't reintroduce jaggies
   const target = new THREE.WebGLRenderTarget(size.x, size.y, {
-    samples: 4,
+    samples: 2,
     type: THREE.HalfFloatType,
   });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
 
-  const gtao = new GTAOPass(scene, camera, size.x, size.y);
+  // half-res AO: halves the fill AND the two extra scene passes it renders
+  const gtao = new GTAOPass(scene, camera, size.x / 2, size.y / 2);
+  const gtaoSetSize = gtao.setSize.bind(gtao);
+  gtao.setSize = (w, h) => gtaoSetSize(w / 2, h / 2);
   gtao.blendIntensity = 0.85;
   gtao.updateGtaoMaterial({
     radius: 0.5,
