@@ -7,12 +7,14 @@ import {
   fluffyTuftTexture,
   softNoiseTexture,
   leafClusterTexture,
+  impostorCardTexture,
 } from "../Engine/Textures.js";
 
-const TREE_TRIES = 2600;
-const TREE_CELL = 7;
-const TREE_CAP = 460;
-const CHUNKS = 4; // NxN world grid per variant so camera + shadow frustums can cull
+const TREE_TRIES = 9000;
+const TREE_CELL = 5;
+const TREE_CAP = 1500;
+const CHUNKS = 8; // NxN world grid per variant so camera + shadow frustums can cull
+const HANDOFF = 88; // chunk-center distance where full detail swaps to impostors
 const SHRUB_COUNT = 280;
 const GRASS_TILE = 64;
 const GRASS_COUNT = 11000;
@@ -98,11 +100,12 @@ export function createVegetation(hf, heightTex) {
     (rng() < 0.55 ? pines : oaks).push({ x, y, z, s: 0.75 + rng() * 0.75 });
   }
 
-  // tree-local sway, instancing-safe (ez-tree's built-in wind drops instanceMatrix)
-  const treeSway = (mat, H) => {
-    mat.onBeforeCompile = (s) => {
-      s.uniforms.uTime = uTime;
-      s.vertexShader = s.vertexShader
+  // canopy sway, instancing-safe (ez-tree's built-in wind drops instanceMatrix)
+  const leafSway = (mat, H) => {
+    mat.customProgramCacheKey = () => `hn-sway-${H.toFixed(1)}`;
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = uTime;
+      sh.vertexShader = sh.vertexShader
         .replace("#include <common>", "#include <common>\nuniform float uTime;")
         .replace(
           "#include <begin_vertex>",
@@ -114,6 +117,10 @@ export function createVegetation(hf, heightTex) {
         );
     };
   };
+  const fullChunks = [];
+  const impChunks = [];
+  // per-species impostor instances bucketed by chunk: key -> [{x,y,z,ry,w,h,tint}]
+  const impData = { pine: new Map(), oak: new Map() };
 
   const addTreeVariant = (spec, items, heightOf, isPine) => {
     if (!items.length) return;
@@ -130,13 +137,19 @@ export function createVegetation(hf, heightTex) {
       side: THREE.DoubleSide,
       roughness: 1,
     });
-    treeSway(leafMat, variant.height);
+    leafSway(leafMat, variant.height);
 
     const leafDepth = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
       map: leafMat.map,
       alphaTest: 0.35,
     });
+
+    // far impostor dims for this variant (instances collected per chunk below)
+    variant.leafGeo.computeBoundingBox();
+    const lb = variant.leafGeo.boundingBox;
+    const impTop = Math.max(variant.height, lb.max.y);
+    const impW = Math.max(lb.max.x - lb.min.x, lb.max.z - lb.min.z);
 
     // bucket instances into world-grid chunks so frustum culling works
     const chunkOf = (t) =>
@@ -150,7 +163,7 @@ export function createVegetation(hf, heightTex) {
       buckets.get(k).push([t, i]);
     });
 
-    for (const bucket of buckets.values()) {
+    for (const [key, bucket] of buckets.entries()) {
       const branches = new THREE.InstancedMesh(
         variant.branchGeo,
         barkMat,
@@ -173,6 +186,17 @@ export function createVegetation(hf, heightTex) {
         leaves.setMatrixAt(j, m);
         const g = 0.95 + r() * 0.3;
         leaves.setColorAt(j, col.setRGB(g * (0.95 + r() * 0.1), g, g * 0.9));
+        const store = impData[isPine ? "pine" : "oak"];
+        if (!store.has(key)) store.set(key, []);
+        store.get(key).push({
+          x: t.x,
+          y: t.y - 0.1,
+          z: t.z,
+          ry: Mulberry(i * 7 + hf.seed + spec.seed)() * Math.PI * 2,
+          w: impW * sc,
+          h: impTop * sc,
+          tint: [g * (0.95 + r() * 0.1), g, g * 0.9],
+        });
         trunkColliders.push({
           x: t.x,
           z: t.z,
@@ -185,6 +209,12 @@ export function createVegetation(hf, heightTex) {
         mesh.receiveShadow = true;
         group.add(mesh);
       }
+      const cell = (HALF * 2) / CHUNKS;
+      fullChunks.push({
+        meshes: [branches, leaves],
+        cx: -HALF + (((key / CHUNKS) | 0) + 0.5) * cell,
+        cz: -HALF + ((key % CHUNKS) + 0.5) * cell,
+      });
     }
   };
 
@@ -204,6 +234,46 @@ export function createVegetation(hf, heightTex) {
       false,
     ),
   );
+
+  // --- far-tree impostors: unit crossed cards, chunked, species materials ---
+  {
+    const cardA = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+    const unitCard = mergeGeometries([
+      cardA,
+      cardA.clone().rotateY(Math.PI / 2),
+    ]);
+    const nor = unitCard.attributes.normal;
+    for (let i = 0; i < nor.count; i++) nor.setXYZ(i, 0, 1, 0);
+    const cell = (HALF * 2) / CHUNKS;
+    for (const species of ["pine", "oak"]) {
+      const mat = new THREE.MeshStandardMaterial({
+        map: impostorCardTexture(
+          species === "pine" ? 3 : 4,
+          species === "pine",
+        ),
+        alphaTest: 0.3,
+        side: THREE.DoubleSide,
+        roughness: 1,
+      });
+      for (const [key, arr] of impData[species]) {
+        const mesh = new THREE.InstancedMesh(unitCard, mat, arr.length);
+        arr.forEach((d, j) => {
+          m.makeRotationY(d.ry);
+          m.scale(v.set(d.w, d.h, d.w));
+          m.setPosition(d.x, d.y, d.z);
+          mesh.setMatrixAt(j, m);
+          mesh.setColorAt(j, col.setRGB(d.tint[0], d.tint[1], d.tint[2]));
+        });
+        mesh.visible = false;
+        group.add(mesh);
+        impChunks.push({
+          mesh,
+          cx: -HALF + (((key / CHUNKS) | 0) + 0.5) * cell,
+          cz: -HALF + ((key % CHUNKS) + 0.5) * cell,
+        });
+      }
+    }
+  }
 
   // --- FluffyGrass-style near-field grass on the camera-wrap system ---
   const quad = new THREE.PlaneGeometry(1.1, 0.95).translate(0, 0.43, 0);
@@ -330,7 +400,17 @@ export function createVegetation(hf, heightTex) {
 
   const update = (t, camPos) => {
     uTime.value = t;
-    if (camPos) uCamPos.value.copy(camPos);
+    if (!camPos) return;
+    uCamPos.value.copy(camPos);
+    for (const c of fullChunks) {
+      const vis = Math.hypot(camPos.x - c.cx, camPos.z - c.cz) < HANDOFF + 36;
+      c.meshes[0].visible = vis;
+      c.meshes[1].visible = vis;
+    }
+    for (const c of impChunks) {
+      c.mesh.visible =
+        Math.hypot(camPos.x - c.cx, camPos.z - c.cz) >= HANDOFF + 36;
+    }
   };
   return { group, trunkColliders, update };
 }

@@ -98,6 +98,51 @@ export function leafClusterTexture(seed = 11, pine = false) {
   return tex;
 }
 
+// painted far-tree impostor card (drawn for >90m + fog, style-matched)
+export function impostorCardTexture(seed = 3, pine = false) {
+  const W = 128;
+  const H = 256;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d");
+  const rng = Mulberry(seed);
+  ctx.clearRect(0, 0, W, H);
+  // trunk
+  ctx.fillStyle = "#4c3a28";
+  ctx.fillRect(W / 2 - 3, H * 0.55, 6, H * 0.45);
+  if (pine) {
+    for (let t = 0; t < 6; t++) {
+      const y = H * (0.08 + t * 0.13);
+      const w = W * (0.16 + t * 0.115);
+      const g = 70 + rng() * 30 + t * 4;
+      ctx.fillStyle = `rgb(${g * 0.5},${g},${g * 0.55})`;
+      ctx.beginPath();
+      ctx.moveTo(W / 2, y - H * 0.1);
+      ctx.lineTo(W / 2 - w, y + H * 0.09);
+      ctx.lineTo(W / 2 + w, y + H * 0.09);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else {
+    for (let i = 0; i < 9; i++) {
+      const x = W / 2 + (rng() - 0.5) * W * 0.55;
+      const y = H * 0.32 + (rng() - 0.5) * H * 0.34;
+      const r = W * (0.16 + rng() * 0.14);
+      const g = 85 + rng() * 50;
+      ctx.fillStyle = `rgb(${g * 0.58},${g},${g * 0.42})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r, r * 0.85, rng() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
+  return tex;
+}
+
 // wobbly bright cells on black; two scrolling reads min()ed = caustics
 export function causticTexture(seed = 17) {
   const S = 256;
