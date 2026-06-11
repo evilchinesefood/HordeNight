@@ -8,9 +8,9 @@ First-person 3D zombie-survival game (7 Days to Die-inspired) built with [Three.
 
 - **Terrain** — seeded procedural heightfield (simplex FBM), rolling hills, vertex-color surface that shifts between grass, dirt, and rock by height and slope.
 - **Stream** — a winding river carved into the terrain with animated, semi-transparent flowing water.
-- **Vegetation** — ez-tree generated pines/oaks/ashes (full detail near, painted impostors far), shrubs, and 11k camera-following wind-swayed grass tufts; everything placed by slope/water/clearing rules.
-- **Buildings** — cabins, a barn, stone ruins, and a watchtower on flattened pads, all with collision.
-- **Atmosphere** — low warm sun with soft real-time shadows (texel-snapped frustum follows the player), cool ambient fill, scattering sky, distance fog, and procedural WebAudio ambience (wind, birds, water that swells near the stream).
+- **Vegetation** — ez-tree generated pines/oaks/ashes (full detail near, render-baked impostor cards far), shrubs, and 11k camera-following wind-swayed grass tufts; everything placed by slope/water/clearing rules.
+- **Buildings** — hollow, walk-in cabins and a barn, lean-to sheds, stone ruins, and a watchtower on flattened pads, all with collision.
+- **Atmosphere** — late-morning sun with soft real-time shadows (texel-snapped frustum follows the player), cool ambient fill, scattering sky, distance fog with a warm in-scatter lobe toward the sun, drizzle cycles, and procedural WebAudio ambience (wind, birds, rain, water that swells near the stream).
 - **Player** — first-person controller: WASD, mouse look, Shift sprint, Space jump; follows terrain height and collides with buildings, trees, rocks, logs, fences, barrels, and the well; low obstacles can be stepped or jumped onto.
 
 The whole world is generated from one seed (`SEED` in `Source/Main.js`) — textures are canvas-generated, except tree bark PBR maps which ship inside the ez-tree package.

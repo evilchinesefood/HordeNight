@@ -61,6 +61,14 @@
       </p>
       <p class="Hint">Loading&hellip;</p>
     </div>
+    <script>
+      // module-load failure fallback; Main.js owns the hint once it boots
+      window.addEventListener("error", function () {
+        var h = document.querySelector("#Overlay .Hint");
+        if (h && h.textContent.indexOf("Loading") === 0)
+          h.textContent = "Failed to load - check your connection and refresh.";
+      });
+    </script>
     <script type="module" src="/Source/Main.js"></script>
   </body>
 </html>

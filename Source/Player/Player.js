@@ -3,9 +3,11 @@ import { BOUND } from "../Core/Heightfield.js";
 import { resolvePlayer, standHeight } from "../Engine/Collision.js";
 
 const EYE = 1.7;
-const RADIUS = 0.45;
+// exported: RunAll asserts SPRINT * DT_MAX < RADIUS (thin-wall tunnel guard)
+export const RADIUS = 0.45;
+export const SPRINT = 8.8;
+export const DT_MAX = 0.05; // Main clamps frame dt to this
 const WALK = 5.2;
-const SPRINT = 8.8;
 const ACCEL = 11;
 const AIR_ACCEL = 2.5;
 const GRAVITY = 22;
@@ -71,6 +73,7 @@ export class Player {
     }
     if (!this.grounded) this.vel.y -= GRAVITY * dt;
 
+    const prevY = this.pos.y; // pre-fall feet height for swept top-crossing
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
     this.pos.y += this.vel.y * dt;
@@ -86,6 +89,7 @@ export class Player {
       this.pos.y + EYE,
       this.boxes,
       this.trunks,
+      prevY,
     );
     this.pos.x = r.x;
     this.pos.z = r.z;
@@ -99,6 +103,7 @@ export class Player {
         this.pos.y,
         this.boxes,
         this.trunks,
+        prevY,
       ),
     );
     if (this.pos.y <= ground) {

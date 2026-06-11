@@ -9,7 +9,7 @@ import {
   standHeight,
 } from "../Source/Engine/Collision.js";
 import { buildSitePaths, pathDistance } from "../Source/Core/SitePaths.js";
-import { Player } from "../Source/Player/Player.js";
+import { Player, RADIUS, SPRINT, DT_MAX } from "../Source/Player/Player.js";
 import * as THREE from "three";
 
 let passed = 0;
@@ -125,9 +125,32 @@ test("Collision: step-band tops are stood on, not pushed", () => {
   assert.ok(low.x >= 1.5 - 1e-9);
   // a top far above the step band is not standable
   assert.equal(standHeight(0.9, 0, 0.45, 0.2, boxes, []), -Infinity);
+  // diagonal off the box corner: exact circle test, no standing on air
+  assert.equal(standHeight(1.4, 1.4, 0.45, 1.05, boxes, []), -Infinity);
   // circles behave the same
   const circles = [{ x: 0, z: 0, r: 0.4, topY: 1 }];
   assert.equal(standHeight(0.3, 0, 0.45, 1.1, [], circles), 1);
+});
+
+test("Collision: a top crossed from above in one frame lands, never slides off", () => {
+  const boxes = [{ minX: -1, maxX: 1, minZ: -1, maxZ: 1, minY: 0, maxY: 1 }];
+  // low-fps fall: feet went 1.2 -> 0.4 in a single frame (0.6 below the top)
+  const r = resolvePlayer(0.9, 0, 0.45, 0.4, 2.1, boxes, [], 1.2);
+  assert.equal(r.x, 0.9); // no lateral pop
+  assert.equal(standHeight(0.9, 0, 0.45, 0.4, boxes, [], 1.2), 1); // lands on top
+  // the same depth without from-above history is still pushed out laterally
+  const pushed = resolvePlayer(1.2, 0, 0.5, 0.4, 2.1, boxes, [], 0.4);
+  assert.ok(pushed.x >= 1.5 - 1e-9);
+  // circles follow the same rule
+  const circles = [{ x: 0, z: 0, r: 0.4, topY: 1 }];
+  assert.equal(standHeight(0.3, 0, 0.45, 0.4, [], circles), -Infinity);
+  assert.equal(standHeight(0.3, 0, 0.45, 0.4, [], circles, 1.2), 1);
+});
+
+test("Player: max per-frame step cannot tunnel a 0.2m wall", () => {
+  // the resolver ejects to the NEAR face only while the circle center hasn't
+  // crossed a wall's midplane; one sprint step must stay under the radius
+  assert.ok(SPRINT * DT_MAX < RADIUS);
 });
 
 test("SitePaths: deterministic, deduped, rejects stream crossings", () => {

@@ -9,10 +9,11 @@ const RAIN_LAYER = 2; // custom vertex shader -> excluded from GTAO pre-passes
 // drizzle cycle + camera-following rain streaks; while raining the fog
 // closes in, the sun dims and grass gusts pick up (shared-wind model)
 export class Weather {
-  constructor(scene, sun, fog, renderer, seed = 7) {
+  constructor(scene, sun, fog, renderer, seed = 7, setOvercast = null) {
     this.sun = sun;
     this.fog = fog;
     this.renderer = renderer;
+    this.setOvercast = setOvercast;
     this.baseExposure = renderer.toneMappingExposure;
     this.baseSun = sun.intensity;
     this.baseNear = fog.near;
@@ -20,6 +21,8 @@ export class Weather {
     this.baseCol = fog.color.clone();
     this.wetCol = new THREE.Color(0x99a3ac);
     this.intensity = 0;
+    this.visMix = 0; // streak visibility: follows intensity, fades indoors
+    this.lastApplied = NaN;
     this.gust = 1;
     this.t = 0;
 
@@ -30,9 +33,13 @@ export class Weather {
       const x = (rng() * 2 - 1) * BOX;
       const y = rng() * H;
       const z = (rng() * 2 - 1) * BOX;
-      pos.set([x, y, z, x, y, z], i * 6);
+      pos[i * 6] = pos[i * 6 + 3] = x;
+      pos[i * 6 + 1] = pos[i * 6 + 4] = y;
+      pos[i * 6 + 2] = pos[i * 6 + 5] = z;
       const s = rng();
-      seeds.set([s, 1, s, 0], i * 4);
+      seeds[i * 4] = seeds[i * 4 + 2] = s;
+      seeds[i * 4 + 1] = 1;
+      seeds[i * 4 + 3] = 0;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -75,7 +82,14 @@ export class Weather {
     this.force = q.has("rain") ? 1 : q.has("norain") ? 0 : null;
   }
 
-  update(dt, p) {
+  // baseSun is also rewritten by the day/night dev preset; going through here
+  // invalidates the quiesce cache so the new baseline applies immediately
+  setBaseSun(v) {
+    this.baseSun = v;
+    this.lastApplied = NaN;
+  }
+
+  update(dt, p, indoor = false) {
     this.t += dt;
     // layered slow sines: long clear stretches, occasional drizzle
     const c =
@@ -83,14 +97,21 @@ export class Weather {
     const k = Math.min(1, Math.max(0, (c - 0.45) / 0.3));
     const target = this.force ?? k * k * (3 - 2 * k);
     this.intensity += (target - this.intensity) * Math.min(1, dt * 0.15);
+    if (Math.abs(target - this.intensity) < 1e-3) this.intensity = target;
     const w = this.intensity;
-    this.mesh.visible = w > 0.02;
+    // streaks fade out under a roof; the storm itself continues outside
+    const vis = indoor ? 0 : w;
+    this.visMix += (vis - this.visMix) * Math.min(1, dt * 3);
+    if (Math.abs(vis - this.visMix) < 1e-3) this.visMix = vis;
+    this.mesh.visible = this.visMix > 0.02;
     if (this.mesh.visible) {
       this.mesh.position.set(p.x, p.y - 2, p.z);
       this.uniforms.uTime.value = this.t;
-      this.uniforms.uMix.value = w;
+      this.uniforms.uMix.value = this.visMix;
     }
     this.gust = 1 + w * 1.4;
+    if (w === this.lastApplied) return; // clear-sky frames: nothing to re-derive
+    this.lastApplied = w;
     this.sun.intensity = this.baseSun * (1 - 0.5 * w);
     // overcast: turbid gray dome + global exposure drop
     if (this.setOvercast) this.setOvercast(w);

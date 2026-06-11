@@ -7,9 +7,15 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { VignetteShader } from "three/addons/shaders/VignetteShader.js";
 
-export function createPostFx(renderer, scene, camera, { ao = true } = {}) {
+export function createPostFx(
+  renderer,
+  scene,
+  camera,
+  { ao = true, bloom = true } = {},
+) {
   const pr = renderer.getPixelRatio();
-  const size = renderer.getSize(new THREE.Vector2()).multiplyScalar(pr);
+  const logical = renderer.getSize(new THREE.Vector2());
+  const size = logical.clone().multiplyScalar(pr);
 
   // MSAA on the beauty pass so the composer doesn't reintroduce jaggies
   const target = new THREE.WebGLRenderTarget(size.x, size.y, {
@@ -17,6 +23,10 @@ export function createPostFx(renderer, scene, camera, { ao = true } = {}) {
     type: THREE.HalfFloatType,
   });
   const composer = new EffectComposer(renderer, target);
+  // a custom target makes the composer adopt its PHYSICAL size as _width
+  // while addPass still multiplies by pixelRatio -> every pass would run at
+  // DPR^2 until the first resize; re-sync to logical units before any addPass
+  composer.setSize(logical.x, logical.y);
   composer.addPass(new RenderPass(scene, camera));
 
   if (ao) {
@@ -46,8 +56,8 @@ export function createPostFx(renderer, scene, camera, { ao = true } = {}) {
     composer.addPass(gtao);
   }
 
-  const bloom = new UnrealBloomPass(size, 0.1, 0.25, 2.6);
-  if (!location.search.includes("nobloom")) composer.addPass(bloom);
+  // constructed only when used: the pass allocates its 11-target mip chain immediately
+  if (bloom) composer.addPass(new UnrealBloomPass(size, 0.1, 0.25, 2.6));
   composer.addPass(new OutputPass());
 
   const vignette = new ShaderPass(VignetteShader);

@@ -3,6 +3,7 @@ import { Tree } from "@dgreenheck/ez-tree";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { HALF, WATER_Y } from "../Core/Heightfield.js";
 import { Mulberry } from "../Core/Rng.js";
+import { RES } from "./Terrain.js";
 import {
   fluffyTuftTexture,
   softNoiseTexture,
@@ -95,7 +96,11 @@ function bakeImpostorTexture(renderer, src) {
     w * 4,
   );
   cam.position.set(0, 0, w * 2);
-  const rt = new THREE.WebGLRenderTarget(256, 512);
+  // mipped: far cards are heavily minified (shimmer + texture-cache thrash unmipped)
+  const rt = new THREE.WebGLRenderTarget(256, 512, {
+    generateMipmaps: true,
+    minFilter: THREE.LinearMipmapLinearFilter,
+  });
   const prevTarget = renderer.getRenderTarget();
   const prevTone = renderer.toneMapping;
   const prevClear = new THREE.Color();
@@ -146,20 +151,30 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
     (rng() < 0.55 ? pines : oaks).push({ x, y, z, s: 0.75 + rng() * 0.75 });
   }
 
-  // canopy sway, instancing-safe (ez-tree's built-in wind drops instanceMatrix)
-  const leafSway = (mat, H, seed) => {
-    mat.customProgramCacheKey = () => `hn-sway-${seed}-${H.toFixed(1)}`;
+  // canopy sway, instancing-safe (ez-tree's built-in wind drops instanceMatrix);
+  // sway params are per-material uniforms so all variants share ONE program
+  const leafSway = (mat, H) => {
+    const sway = {
+      uSwayLo: { value: H * 0.25 },
+      uSwayHi: { value: H * 0.95 },
+      uSwayAx: { value: H * 0.008 },
+      uSwayAz: { value: H * 0.006 },
+    };
+    mat.customProgramCacheKey = () => "hn-sway";
     mat.onBeforeCompile = (sh) => {
-      sh.uniforms.uTime = uTime;
+      Object.assign(sh.uniforms, { uTime }, sway);
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nuniform float uTime;")
+        .replace(
+          "#include <common>",
+          "#include <common>\nuniform float uTime, uSwayLo, uSwayHi, uSwayAx, uSwayAz;",
+        )
         .replace(
           "#include <begin_vertex>",
           `#include <begin_vertex>
           float wPh = instanceMatrix[3][0] * 0.31 + instanceMatrix[3][2] * 0.27;
-          float wAt = smoothstep( ${(H * 0.25).toFixed(1)}, ${(H * 0.95).toFixed(1)}, transformed.y );
-          transformed.x += ( sin( uTime * 0.6 + wPh ) + 0.4 * sin( uTime * 1.7 + wPh * 1.7 ) ) * wAt * ${(H * 0.008).toFixed(2)};
-          transformed.z += cos( uTime * 0.47 + wPh * 1.3 ) * wAt * ${(H * 0.006).toFixed(2)};`,
+          float wAt = smoothstep( uSwayLo, uSwayHi, transformed.y );
+          transformed.x += ( sin( uTime * 0.6 + wPh ) + 0.4 * sin( uTime * 1.7 + wPh * 1.7 ) ) * wAt * uSwayAx;
+          transformed.z += cos( uTime * 0.47 + wPh * 1.3 ) * wAt * uSwayAz;`,
         );
     };
   };
@@ -195,7 +210,7 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
       side: THREE.DoubleSide,
       roughness: 1,
     });
-    leafSway(leafMat, variant.height, spec.seed);
+    leafSway(leafMat, variant.height);
 
     const leafDepth = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
@@ -272,8 +287,9 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
         });
       });
       // alpha-tested cards stamp solid squares into the GTAO pre-passes
-      // (override materials ignore alphaTest) -> AO-excluded layer; the sun
-      // shadow camera has layer 2 enabled so canopies still cast shadows
+      // (override materials ignore alphaTest) -> AO-excluded layer 2; they
+      // still cast shadows because the MAIN camera keeps layer 2 enabled
+      // (three tests shadow casters against the view camera's mask)
       leaves.layers.set(2);
       for (const mesh of [branches, leaves]) {
         mesh.castShadow = true;
@@ -318,9 +334,14 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
     const cell = (HALF * 2) / CHUNKS;
     for (const species of ["pine", "oak"]) {
       const mat = new THREE.MeshStandardMaterial({
-        map: bakeSrc[species]
-          ? bakeImpostorTexture(renderer, bakeSrc[species])
-          : impostorCardTexture(species === "pine" ? 3 : 4, species === "pine"),
+        // painted fallback keeps world-gen renderer-optional (Node tests)
+        map:
+          renderer && bakeSrc[species]
+            ? bakeImpostorTexture(renderer, bakeSrc[species])
+            : impostorCardTexture(
+                species === "pine" ? 3 : 4,
+                species === "pine",
+              ),
         alphaTest: 0.3,
         side: THREE.DoubleSide,
         roughness: 1,
@@ -361,18 +382,22 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
     side: THREE.DoubleSide,
     roughness: 1,
   });
+  // hoisted: texture gen must not run inside the mid-frame compile; uSunCol
+  // is reachable so the night preset can kill the warm backlight
+  const grassNoise = softNoiseTexture(hf.seed);
+  const uSunCol = { value: new THREE.Color(0xffe9b8) };
   grassMat.onBeforeCompile = (s) => {
     Object.assign(s.uniforms, {
       uTime,
       uCamPos,
       uGust,
       uHeightTex: { value: heightTex },
-      uNoise: { value: softNoiseTexture(hf.seed) },
+      uNoise: { value: grassNoise },
       uBase: { value: new THREE.Color(0x36481c) },
       uTip1: { value: new THREE.Color(0xa6dd96) },
       uTip2: { value: new THREE.Color(0x3c6336) },
       uSunDir: { value: (sunDir ?? new THREE.Vector3(0, 1, 0)).clone() },
-      uSunCol: { value: new THREE.Color(0xffe9b8) },
+      uSunCol,
     });
     s.vertexShader = s.vertexShader
       .replace(
@@ -393,12 +418,12 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
         vec2 gTuft = vec2( instanceMatrix[3][0], instanceMatrix[3][2] );
         vec2 gWp = gTuft + // NOTE: gWp.y is world Z (vec2 of xz)
          floor( ( uCamPos.xz - gTuft ) / ${GRASS_TILE}.0 + 0.5 ) * ${GRASS_TILE}.0;
-        vec2 gUv = ( ( gWp + ${HALF}.0 ) / ${HALF * 2}.0 * 384.0 + 0.5 ) / 385.0;
+        vec2 gUv = ( ( gWp + ${HALF}.0 ) / ${HALF * 2}.0 * ${RES}.0 + 0.5 ) / ${RES + 1}.0;
         vec4 gHs = texture2D( uHeightTex, gUv );
         float gDist = distance( gWp, uCamPos.xz );
         float gJit = texture2D( uNoise, gWp * 0.13 ).r - 0.5;
         float gFade = ( 1.0 - smoothstep( 18.0, 30.0, gDist ) ) * smoothstep( 0.35, 0.62, gHs.g + gJit * 0.35 );
-        gFade *= 1.0 - step( 198.0, max( abs( gWp.x ), abs( gWp.y ) ) );
+        gFade *= 1.0 - step( ${HALF - 2}.0, max( abs( gWp.x ), abs( gWp.y ) ) );
         transformed = gRs * transformed * gFade;
         float gBend = uv.y * uv.y * gFade;
         float gGust = texture2D( uNoise, gWp * 0.011 + uTime * 0.013 ).r - 0.5;
@@ -492,7 +517,7 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
     side: THREE.DoubleSide,
     roughness: 1,
   });
-  leafSway(bushMat, 1.2, hf.seed + 63);
+  leafSway(bushMat, 1.2);
   const bushes = new THREE.InstancedMesh(bushGeo, bushMat, SHRUB_COUNT);
   bushes.customDepthMaterial = new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking,
@@ -520,7 +545,7 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
   bushes.count = sp;
   bushes.castShadow = true;
   bushes.receiveShadow = true;
-  bushes.layers.set(2); // alpha cards: AO-excluded, shadow cam covers layer 2
+  bushes.layers.set(2); // alpha cards: AO-excluded (shadows via the main camera's mask)
   group.add(bushes);
 
   // LOD records grouped by unique chunk center: one distance test per chunk,
@@ -535,6 +560,7 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
         full: [],
         imp: [],
         on: undefined,
+        fade: 0,
       });
     lodGroups.get(k).full.push(...c.meshes);
   }
@@ -547,6 +573,7 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
         full: [],
         imp: [],
         on: undefined,
+        fade: 0,
       });
     lodGroups.get(k).imp.push(c.mesh);
   }
@@ -580,15 +607,20 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
           // initial state: no dissolve
           for (const mesh of g.full) mesh.visible = on;
           for (const mesh of g.imp) mesh.visible = !on;
+          g.fade = on ? 0 : 1; // steady-state impostor opacity
           continue;
         }
-        // cross-dissolve: full trees stay while the impostor fades in/out
+        // cross-dissolve: full trees stay while the impostor fades in/out.
+        // transparent needs needsUpdate (program swap off the OPAQUE define)
+        // and a tiny alphaTest so the fade survives below the 0.3 cutoff
         for (const mesh of g.full) mesh.visible = true;
         for (const mesh of g.imp) {
           mesh.visible = true;
-          mesh.material.transparent = true;
+          const mat = mesh.material;
+          mat.transparent = true;
+          mat.alphaTest = 0.02;
+          mat.needsUpdate = true;
         }
-        g.fade = g.fade ?? (on ? 1 : 0);
         fading.add(g);
       }
     }
@@ -601,13 +633,27 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
         for (const mesh of g.full) mesh.visible = g.on;
         for (const mesh of g.imp) {
           mesh.visible = !g.on;
-          mesh.material.transparent = false;
-          mesh.material.opacity = 1;
+          const mat = mesh.material;
+          mat.transparent = false;
+          mat.alphaTest = 0.3;
+          mat.opacity = 1;
+          mat.needsUpdate = true;
         }
         continue;
       }
       for (const mesh of g.imp) mesh.material.opacity = g.fade;
     }
   };
-  return { group, trunkColliders, update };
+  // night preset: kill the warm sun-through-blades backlight
+  const setNight = (on) => uSunCol.value.set(on ? 0x2c3a55 : 0xffe9b8);
+
+  // drop build-only intermediates: the returned closures would otherwise pin
+  // the whole factory context (placement arrays, cell keys) for the session
+  pines.length = 0;
+  oaks.length = 0;
+  cells.clear();
+  impData.pine.clear();
+  impData.oak.clear();
+
+  return { group, trunkColliders, update, setNight };
 }

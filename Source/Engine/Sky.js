@@ -18,7 +18,9 @@ const theta = THREE.MathUtils.degToRad(SUN_AZIMUTH);
 const SUN_DIR = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
 
 Object.assign(THREE.UniformsLib.fog, {
-  uFogSunDir: { value: SUN_DIR.clone() },
+  // horizon-projected: fogged geometry sits at/below the horizon, so the
+  // elevation-true dir would zero the pow() lobe (cos(55deg)^24 ~ 1.6e-6)
+  uFogSunDir: { value: new THREE.Vector3(SUN_DIR.x, 0, SUN_DIR.z).normalize() },
   uFogSunColor: { value: new THREE.Color(0xfff3e0) },
   uFogBaseY: { value: 2.0 },
   uFogHeightDecay: { value: 0.06 },
@@ -95,6 +97,7 @@ function createClouds(scene) {
     );
     mat.userData.base = mat.color.clone(); // night preset dims from this
     const mesh = new THREE.InstancedMesh(geo, mat, count);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.layers.set(CLOUD_LAYER);
     mesh.frustumCulled = false;
     mesh.renderOrder = order;
@@ -111,9 +114,10 @@ function createClouds(scene) {
     4,
     9,
     () => ({
-      x: (rng() * 2 - 1) * 700,
+      // +-600 like the cumulus deck: +-700 spawned z beyond the 900 far plane
+      x: (rng() * 2 - 1) * 600,
       y: 250 + rng() * 90,
-      z: (rng() * 2 - 1) * 700,
+      z: (rng() * 2 - 1) * 600,
       w: 300 + rng() * 240,
       h: 30 + rng() * 26,
       speed: 0.7 + rng() * 0.9,
@@ -141,14 +145,18 @@ function createClouds(scene) {
         .copy(mesh.material.userData.base)
         .multiplyScalar(mult);
   };
+  let lastT = -1;
   const update = (t) => {
+    if (lastT >= 0 && t - lastT < 0.1) return; // drift is sub-pixel per frame
+    lastT = t;
     for (const { mesh, items } of layers) {
-      items.forEach((c, i) => {
+      for (let i = 0; i < items.length; i++) {
+        const c = items[i];
         const x = ((((c.x + t * c.speed + 600) % 1200) + 1200) % 1200) - 600;
         m.makeScale(c.w, c.h, 1);
         m.setPosition(x, c.y, c.z);
         mesh.setMatrixAt(i, m);
-      });
+      }
       mesh.instanceMatrix.needsUpdate = true;
     }
   };
@@ -160,28 +168,35 @@ export function createSky(scene) {
   const sky = new Sky();
   sky.scale.setScalar(2000);
   const u = sky.material.uniforms;
-  u.turbidity.value = 3;
-  u.rayleigh.value = 0.5;
-  u.mieCoefficient.value = 0.001;
+  // single source of truth: weather's setOvercast(0) must return EXACTLY here
+  const CLEAR = { turbidity: 3, rayleigh: 0.5, mie: 0.001 };
+  u.turbidity.value = CLEAR.turbidity;
+  u.rayleigh.value = CLEAR.rayleigh;
+  u.mieCoefficient.value = CLEAR.mie;
   u.mieDirectionalG.value = 0.8;
   u.sunPosition.value.copy(SUN_DIR);
   // the raw near-sun glare sits at 3-10x white over +-20deg and the solar
   // disk at ~19000x: ACES clips that whole region to a frame-wide blob.
-  // Two-knee luminance curve: blue sky (<1.6) untouched, glare compressed
+  // Two-knee luminance curve: blue sky (<0.85) untouched, glare compressed
   // to a soft gradient, only the disk stays bright enough to clip white
-  sky.material.fragmentShader = sky.material.fragmentShader
+  const KNEE_NEEDLE = "gl_FragColor = vec4( retColor, 1.0 );";
+  const DISK_NEEDLE =
+    "const float sunAngularDiameterCos = 0.999956676946448443553574619906976478926848692873900859324;";
+  const skyFrag = sky.material.fragmentShader;
+  if (!skyFrag.includes(KNEE_NEEDLE) || !skyFrag.includes(DISK_NEEDLE))
+    console.warn(
+      "Sky shader patch needles missing - a three upgrade changed Sky.js; the supernova sun is back",
+    );
+  sky.material.fragmentShader = skyFrag
     .replace(
-      "gl_FragColor = vec4( retColor, 1.0 );",
+      KNEE_NEEDLE,
       `float skyL = dot( retColor, vec3( 0.2126, 0.7152, 0.0722 ) );
       float skyK = skyL < 0.85 ? skyL
         : skyL < 12.0 ? 0.85 + ( skyL - 0.85 ) * 0.18
         : 2.857 + ( skyL - 12.0 ) * 0.0004;
       gl_FragColor = vec4( retColor * ( skyK / max( skyL, 1e-4 ) ), 1.0 );`,
     )
-    .replace(
-      "const float sunAngularDiameterCos = 0.999956676946448443553574619906976478926848692873900859324;",
-      "const float sunAngularDiameterCos = 0.9999893;",
-    );
+    .replace(DISK_NEEDLE, "const float sunAngularDiameterCos = 0.9999893;");
   scene.add(sky);
 
   // cool base haze; the fog patch warms it toward the sun
@@ -197,8 +212,9 @@ export function createSky(scene) {
   cam.far = 400;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.15; // roof slopes striped with acne at 0.03
-  // AO-excluded foliage (layer 2) must still cast canopy shadows
-  cam.layers.enable(2);
+  // NOTE: shadow visibility is tested against the MAIN camera's layer mask
+  // (not this shadow camera), so layer-2 foliage casts shadows only because
+  // Main.js enables layer 2 on the player camera - that enable is load-bearing
   scene.add(sun, sun.target);
 
   // cool fill so shadows read blue against the warm sun
@@ -219,9 +235,9 @@ export function createSky(scene) {
   // NOTE: weather calls this every frame - w=0 MUST equal the clear-sky
   // uniforms above or it silently overrides any tuning
   const setOvercast = (w) => {
-    u.turbidity.value = 3 + w * 17;
-    u.mieCoefficient.value = 0.001 + w * 0.007;
-    u.rayleigh.value = 0.5 - w * 0.32;
+    u.turbidity.value = CLEAR.turbidity + w * 17;
+    u.mieCoefficient.value = CLEAR.mie + w * 0.007;
+    u.rayleigh.value = CLEAR.rayleigh - w * 0.32;
     clouds.setTone(cloudTone(w));
   };
   const setNight = (on) => {
@@ -237,13 +253,14 @@ export function createSky(scene) {
 
   const clouds = createClouds(scene);
 
-  const texel = (SHADOW_SPAN * 2) / SHADOW_RES;
+  // snap in 16-texel (1m) steps: still texel-aligned (no edge shimmer), but
+  // coarse enough that walking doesn't re-render the caster pass every frame
+  const SNAP = ((SHADOW_SPAN * 2) / SHADOW_RES) * 16;
   let lastTx = null;
   let lastTz = null;
   const update = (target, t = 0) => {
-    // snap the shadow frustum to texels so edges don't shimmer while walking
-    const tx = Math.round(target.x / texel) * texel;
-    const tz = Math.round(target.z / texel) * texel;
+    const tx = Math.round(target.x / SNAP) * SNAP;
+    const tz = Math.round(target.z / SNAP) * SNAP;
     const moved = tx !== lastTx || tz !== lastTz;
     if (moved) {
       lastTx = tx;

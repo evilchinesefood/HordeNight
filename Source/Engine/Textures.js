@@ -1,12 +1,19 @@
 import * as THREE from "three";
 import { Mulberry } from "../Core/Rng.js";
 
-function canvas(size) {
+function canvas(w, h = w) {
   const c = document.createElement("canvas");
-  c.width = c.height = size;
+  c.width = w;
+  c.height = h;
   const ctx = c.getContext("2d");
   if (!ctx) throw new Error("2D canvas unavailable - cannot generate textures");
   return [c, ctx];
+}
+
+// renderer capability, set once from Main before texture sets are built
+let ANISO = 1;
+export function setTextureAnisotropy(n) {
+  ANISO = n;
 }
 
 // FluffyGrass-style tuft: fat tapered blades, grayscale shading in rgb,
@@ -116,10 +123,7 @@ export function leafClusterTexture(seed = 11, pine = false) {
 export function impostorCardTexture(seed = 3, pine = false) {
   const W = 128;
   const H = 256;
-  const c = document.createElement("canvas");
-  c.width = W;
-  c.height = H;
-  const ctx = c.getContext("2d");
+  const [c, ctx] = canvas(W, H);
   const rng = Mulberry(seed);
   ctx.clearRect(0, 0, W, H);
   // trunk
@@ -382,8 +386,9 @@ function heightToNormalCanvas(hctx, S, strength) {
       const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
       const inv = 1 / Math.sqrt(dx * dx + dy * dy + 1);
       const i = (y * S + x) * 4;
+      // flipY upload: v runs opposite canvas y -> red = 128 - dx, green = 128 + dy
       img.data[i] = 128 - dx * inv * 127;
-      img.data[i + 1] = 128 - dy * inv * 127;
+      img.data[i + 1] = 128 + dy * inv * 127;
       img.data[i + 2] = inv * 255;
       img.data[i + 3] = 255;
     }
@@ -394,6 +399,7 @@ function heightToNormalCanvas(hctx, S, strength) {
 function tex(c, srgb) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = ANISO; // walls/roofs/props are mostly seen at grazing angles
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -803,37 +809,6 @@ export function rockSurfaceSet(seed = 61) {
   );
 }
 
-// dense tiny-leaf surface for shrubs
-export function shrubTextureSet(seed = 63) {
-  const set = makeLayer(
-    seed,
-    256,
-    "#3c5524",
-    (a, h, rng, S) => {
-      for (let i = 0; i < 340; i++) {
-        const x = rng() * S,
-          y = rng() * S,
-          r = 2.5 + rng() * 4.5;
-        const g = 90 + rng() * 70;
-        wrapDot(a, S, x, y, r, `rgb(${g * 0.52},${g},${g * 0.4})`, 0.7);
-        wrapDot(
-          h,
-          S,
-          x,
-          y,
-          r,
-          rng() < 0.5 ? "rgb(108,108,108)" : "rgb(152,152,152)",
-          0.6,
-        );
-      }
-    },
-    2.6,
-  );
-  set.map.repeat.set(2, 2);
-  set.nor.repeat.set(2, 2);
-  return set;
-}
-
 // blobby tileable gray noise (foam masks etc)
 export function softNoiseTexture(seed = 21) {
   const S = 128;
@@ -882,7 +857,8 @@ export function waterNormalTexture(seed = 5) {
       const dx = blur[y * S + ((x + 1) % S)] - blur[y * S + ((x - 1 + S) % S)];
       const dy = blur[((y + 1) % S) * S + x] - blur[((y - 1 + S) % S) * S + x];
       const i = (y * S + x) * 4;
-      img.data[i] = 128 + dx * 600;
+      // same convention as heightToNormalCanvas: red = -dx, green = +dy
+      img.data[i] = 128 - dx * 600;
       img.data[i + 1] = 128 + dy * 600;
       img.data[i + 2] = 255;
       img.data[i + 3] = 255;

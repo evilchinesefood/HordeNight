@@ -32,13 +32,19 @@ function rockGeo() {
   return geo;
 }
 
-export function createClutter(hf) {
+export function createClutter(hf, buildingBoxes = []) {
   const rng = Mulberry(hf.seed + 67);
   const group = new THREE.Group();
   const circles = [];
   const m = new THREE.Matrix4();
   const e = new THREE.Euler();
   const col = new THREE.Color();
+  // hollow buildings: rocks/logs must not pierce walls or squat in interiors
+  const inBuilding = (x, z, r) =>
+    buildingBoxes.some(
+      (b) =>
+        x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r,
+    );
 
   const slopeAt = (x, z) =>
     Math.abs(hf.heightAt(x + 2, z) - hf.heightAt(x - 2, z)) +
@@ -63,6 +69,7 @@ export function createClutter(hf) {
     if (hf.sites.some((s) => (s.x - x) ** 2 + (s.z - z) ** 2 < 7 ** 2))
       continue;
     const s = 0.25 + rng() * rng() * 1.5;
+    if (inBuilding(x, z, 0.8 * s + 0.2)) continue;
     m.makeRotationFromEuler(
       e.set(rng() * 0.5, rng() * Math.PI * 2, rng() * 0.5),
     );
@@ -99,6 +106,7 @@ export function createClutter(hf) {
     if (y < WATER_Y + 0.5 || slopeAt(x, z) > 1.2) continue;
     if (hf.sites.some((s) => (s.x - x) ** 2 + (s.z - z) ** 2 < 11 ** 2))
       continue;
+    if (inBuilding(x, z, 2.5)) continue; // sheds sit outside the 11m site gate
     const L = 2.6 + rng() * 2;
     const a = rng() * Math.PI * 2;
     m.makeRotationFromEuler(e.set(0, a, (rng() - 0.5) * 0.1));

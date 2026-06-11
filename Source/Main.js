@@ -10,16 +10,22 @@ import { createBuildings } from "./World/Buildings.js";
 import { createClutter } from "./World/Clutter.js";
 import { AudioAmbience } from "./World/AudioAmbience.js";
 import { Weather } from "./World/Weather.js";
-import { Player } from "./Player/Player.js";
+import { Player, DT_MAX } from "./Player/Player.js";
+import { setTextureAnisotropy } from "./Engine/Textures.js";
 
 const SEED = 7;
+const QS = new URLSearchParams(location.search);
+const DEBUG = QS.has("debug");
 
 const hintEl = document.querySelector("#Overlay .Hint");
 const setHint = (t) => hintEl && (hintEl.textContent = t);
 
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  // antialias off: all scene rendering goes through the composer, whose
+  // samples:2 target does the real AA - an MSAA backbuffer would only
+  // multisample the final fullscreen quad (~80MB VRAM + a resolve, wasted)
+  renderer = new THREE.WebGLRenderer({ antialias: false });
 } catch (err) {
   setHint(
     "WebGL 2 is required - enable hardware acceleration or update your browser.",
@@ -28,6 +34,7 @@ try {
 }
 renderer.domElement.addEventListener("webglcontextlost", (e) => {
   e.preventDefault(); // allow restoration
+  document.exitPointerLock?.(); // a locked pointer over a dead canvas traps the user
   document.getElementById("Overlay").classList.remove("Hidden");
   setHint("Graphics device lost - recovering\u2026");
 });
@@ -52,7 +59,10 @@ const camera = new THREE.PerspectiveCamera(
   900,
 );
 camera.layers.enable(1); // clouds
-camera.layers.enable(2); // AO-excluded world meshes (grass, water)
+// AO-excluded world meshes (grass, water, foliage cards). LOAD-BEARING for
+// shadows too: three tests shadow casters against THIS camera's layer mask
+camera.layers.enable(2);
+setTextureAnisotropy(Math.min(renderer.capabilities.getMaxAnisotropy(), 8));
 
 setHint("Generating world\u2026");
 await new Promise((r) => setTimeout(r)); // let the overlay paint before the heavy work
@@ -72,53 +82,77 @@ scene.add(veg.group);
 await new Promise((r) => setTimeout(r));
 const buildings = createBuildings(hf);
 scene.add(buildings.group);
-const clutter = createClutter(hf);
+const clutter = createClutter(hf, buildings.colliders);
 scene.add(clutter.group);
 
+// the world never moves after assembly: freeze matrices so the 600+ static
+// objects skip recomposition in every render (beauty + GTAO pre-pass)
+scene.updateMatrixWorld(true);
+for (const root of [
+  terrain.mesh,
+  water.mesh,
+  veg.group,
+  buildings.group,
+  clutter.group,
+])
+  root.traverse((o) => (o.matrixAutoUpdate = false));
+
 const postFx = createPostFx(renderer, scene, camera, {
-  ao: !location.search.includes("noao"),
+  ao: !QS.has("noao"),
+  bloom: !QS.has("nobloom"),
 });
 const input = new Input(renderer.domElement);
 const audio = new AudioAmbience();
-const weather = new Weather(scene, sky.sun, scene.fog, renderer);
-weather.setOvercast = sky.setOvercast;
+const weather = new Weather(
+  scene,
+  sky.sun,
+  scene.fog,
+  renderer,
+  SEED,
+  sky.setOvercast,
+);
 
-// dev menu: force day/night/rain for testing (visible while unpaused)
-const devMenu = document.createElement("div");
-devMenu.style.cssText =
-  "position:fixed;bottom:10px;left:10px;z-index:1000;display:flex;gap:6px;" +
-  "font:12px monospace";
-const devBtn = (label, fn) => {
-  const b = document.createElement("button");
-  b.textContent = label;
-  b.style.cssText =
-    "background:rgba(0,0,0,.7);color:#cde;border:1px solid #567;" +
-    "padding:5px 10px;cursor:pointer";
-  b.addEventListener("click", (e) => {
-    e.stopPropagation();
-    fn(b);
-  });
-  devMenu.appendChild(b);
-  return b;
-};
-devBtn("Day", () => {
-  weather.baseSun = sky.setNight(false);
-  renderer.shadowMap.needsUpdate = true;
-});
-devBtn("Night", () => {
-  weather.baseSun = sky.setNight(true);
-  renderer.shadowMap.needsUpdate = true;
-});
-devBtn("Rain: auto", (b) => {
-  weather.force = weather.force === null ? 1 : weather.force === 1 ? 0 : null;
-  b.textContent =
+// dev menu (?debug only): force day/night/rain; shows while paused/unlocked
+let devMenu = null;
+if (DEBUG) {
+  devMenu = document.createElement("div");
+  devMenu.style.cssText =
+    "position:fixed;bottom:10px;left:10px;z-index:1000;display:flex;gap:6px;" +
+    "font:12px monospace";
+  const devBtn = (label, fn) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.style.cssText =
+      "background:rgba(0,0,0,.7);color:#cde;border:1px solid #567;" +
+      "padding:5px 10px;cursor:pointer";
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      fn(b);
+      b.blur(); // keep Space/Enter on the pause screen from re-firing it
+    });
+    devMenu.appendChild(b);
+    return b;
+  };
+  const applyNight = (on) => {
+    weather.setBaseSun(sky.setNight(on));
+    veg.setNight(on);
+    weather.baseCol.set(on ? 0x121722 : 0xc7cdd6); // fog baseline follows
+    renderer.shadowMap.needsUpdate = true;
+  };
+  devBtn("Day", () => applyNight(false));
+  devBtn("Night", () => applyNight(true));
+  const rainLabel = () =>
     weather.force === null
       ? "Rain: auto"
       : weather.force
         ? "Rain: on"
         : "Rain: off";
-});
-document.body.appendChild(devMenu);
+  devBtn(rainLabel(), (b) => {
+    weather.force = weather.force === null ? 1 : weather.force === 1 ? 0 : null;
+    b.textContent = rainLabel();
+  });
+  document.body.appendChild(devMenu);
+}
 
 // spawn near the first cabin, facing the world center, on validated clear ground
 const home = hf.sites[0] ?? { x: 0, z: 0 };
@@ -163,7 +197,12 @@ const player = new Player(
 );
 
 const overlay = document.getElementById("Overlay");
-const desktop = "requestPointerLock" in document.body;
+// capability, not API presence: Android Chrome exposes requestPointerLock
+// but has no fine pointer - those users need the desktop message
+const desktop = matchMedia("(any-pointer: fine)").matches;
+// compile every scene program while the overlay is still up so the first
+// click doesn't hitch on 20+ synchronous shader compiles
+await renderer.compileAsync(scene, camera).catch(() => {});
 setHint(
   desktop
     ? "Click to explore"
@@ -181,7 +220,7 @@ document.addEventListener("visibilitychange", () => {
   else audio.ctx.resume();
 });
 let statsHud = null;
-if (location.search.includes("debug")) {
+if (DEBUG) {
   overlay.classList.add("Hidden");
   statsHud = document.createElement("div");
   statsHud.style.cssText =
@@ -212,13 +251,13 @@ if (location.search.includes("debug")) {
 }
 input.onLockChange = (locked) => {
   overlay.classList.toggle("Hidden", locked);
-  devMenu.style.display = locked ? "none" : "flex";
+  if (devMenu) devMenu.style.display = locked ? "none" : "flex";
   if (locked) everLocked = true;
   else if (everLocked)
     setHint("Paused - click to resume \u00b7 Esc releases the mouse");
 };
 
-window.addEventListener("resize", () => {
+const applySize = () => {
   const pr = Math.min(window.devicePixelRatio, 1.5);
   renderer.setPixelRatio(pr);
   postFx.setPixelRatio(pr);
@@ -226,22 +265,50 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   postFx.setSize(window.innerWidth, window.innerHeight);
-});
+};
+window.addEventListener("resize", applySize);
+// DPR can change with no resize event (window dragged between monitors);
+// the matchMedia query matches the CURRENT dpr, so re-arm after each change
+let dprWatch = null;
+const onDprChange = () => {
+  applySize();
+  armDprWatch();
+};
+const armDprWatch = () => {
+  if (dprWatch) dprWatch.removeEventListener("change", onDprChange);
+  dprWatch = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+  dprWatch.addEventListener("change", onDprChange);
+};
+armDprWatch();
+
+// roofed footprints occlude the camera-local rain
+const indoorNow = () =>
+  buildings.interiors.some(
+    (b) =>
+      player.pos.x > b.minX &&
+      player.pos.x < b.maxX &&
+      player.pos.z > b.minZ &&
+      player.pos.z < b.maxZ,
+  );
 
 let last = performance.now();
+let lastDraw = 0;
 let elapsed = 0;
 renderer.setAnimationLoop(() => {
   const now = performance.now();
-  const dt = Math.min((now - last) / 1000, 0.05);
+  // paused behind the translucent overlay: ~30fps is plenty (battery/thermal)
+  if (!input.locked && !statsHud && now - lastDraw < 33) return;
+  lastDraw = now;
+  const dt = Math.min((now - last) / 1000, DT_MAX);
   last = now;
   elapsed += dt;
   if (input.locked) player.update(dt);
-  weather.update(dt, player.pos);
+  weather.update(dt, player.pos, indoorNow());
   water.update(dt);
   terrain.update(elapsed);
   veg.update(elapsed, player.pos, weather.gust);
   if (sky.update(player.pos, elapsed)) renderer.shadowMap.needsUpdate = true;
-  audio.update(dt, hf.streamDist(player.pos.x, player.pos.z));
+  audio.update(dt, hf.streamDist(player.pos.x, player.pos.z), weather.visMix);
   if (statsHud) {
     renderer.info.reset();
     statsHud.tick();
@@ -251,11 +318,14 @@ renderer.setAnimationLoop(() => {
 
 // debug handle for automated smoke tests
 window.HN = { player, hf, scene, renderer, camera, veg, weather, sky };
-const tp = new URLSearchParams(location.search).get("tp");
+const tp = QS.get("tp");
 if (tp) {
   const [x, z, yaw, pitch, up] = tp.split(",").map(Number);
-  player.pos.set(x, hf.heightAt(x, z) + (up || 0), z);
-  player.yaw = yaw || 0;
-  player.pitch = pitch || 0;
-  player.update(0);
+  // malformed values would NaN-poison the camera matrix with no recovery
+  if (Number.isFinite(x) && Number.isFinite(z)) {
+    player.pos.set(x, hf.heightAt(x, z) + (up || 0), z);
+    player.yaw = yaw || 0;
+    player.pitch = pitch || 0;
+    player.update(0);
+  }
 }

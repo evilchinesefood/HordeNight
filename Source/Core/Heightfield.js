@@ -65,8 +65,13 @@ export function makeHeightfield(seed = 7) {
   const heightAt = (x, z) => {
     let h = rawH(x, z);
     for (const s of sites) {
-      const d = Math.hypot(x - s.x, z - s.z);
-      if (d < 14) h = lerp(s.y, h, smooth(clamp01((d - 7) / 7)));
+      const dx = x - s.x;
+      const dz = z - s.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < 196) {
+        const d = Math.sqrt(d2);
+        h = lerp(s.y, h, smooth(clamp01((d - 7) / 7)));
+      }
     }
     return h;
   };

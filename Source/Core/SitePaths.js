@@ -34,12 +34,15 @@ export function buildSitePaths(sites, streamDist) {
 }
 
 export function pathDistance(paths, x, z) {
-  let best = 1e9;
+  let best2 = 1e18;
   for (const [ax, az, bx, bz] of paths) {
     const dx = bx - ax;
     const dz = bz - az;
     const t = clamp01(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz));
-    best = Math.min(best, Math.hypot(x - (ax + dx * t), z - (az + dz * t)));
+    const ex = x - (ax + dx * t);
+    const ez = z - (az + dz * t);
+    const d2 = ex * ex + ez * ez;
+    if (d2 < best2) best2 = d2;
   }
-  return best;
+  return Math.sqrt(best2);
 }

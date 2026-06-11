@@ -80,6 +80,18 @@ export class AudioAmbience {
     this.waterGain.gain.value = 0;
     water.connect(bp).connect(this.waterGain).connect(this.master);
     water.start();
+
+    // rain: lowpassed reuse of the white-noise loop, offset to decorrelate
+    const rain = ctx.createBufferSource();
+    rain.buffer = water.buffer;
+    rain.loop = true;
+    const rainLp = ctx.createBiquadFilter();
+    rainLp.type = "lowpass";
+    rainLp.frequency.value = 2600;
+    this.rainGain = ctx.createGain();
+    this.rainGain.gain.value = 0;
+    rain.connect(rainLp).connect(this.rainGain).connect(this.master);
+    rain.start(0, 1.7);
     if (ctx.state !== "running") ctx.resume();
   }
 
@@ -137,13 +149,19 @@ export class AudioAmbience {
     }
   }
 
-  update(dt, streamDistance) {
+  update(dt, streamDistance, rain = 0) {
     if (!this.started) return;
     this.waterTimer = (this.waterTimer || 0) - dt;
     if (this.waterTimer <= 0) {
       this.waterTimer = 0.2;
       const target = 0.4 * Math.max(0, 1 - streamDistance / 45) ** 2;
       this.waterGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.4);
+      // rain follows the VISIBLE mix, so it muffles to silence indoors
+      this.rainGain.gain.setTargetAtTime(
+        rain * 0.26,
+        this.ctx.currentTime,
+        0.5,
+      );
     }
     this.birdTimer -= dt;
     if (this.birdTimer <= 0) {

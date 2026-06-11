@@ -4,7 +4,7 @@ import { Fbm2 } from "../Core/Noise.js";
 import { groundTextureSet, causticTexture } from "../Engine/Textures.js";
 import { buildSitePaths, pathDistance } from "../Core/SitePaths.js";
 
-const RES = 384;
+export const RES = 384; // heightTex grid: shared by the water + grass shaders
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
 
 const SPLAT_GLSL = `
@@ -25,7 +25,7 @@ const SPLAT_GLSL = `
   diffuseColor.rgb *= alb * vColor;
 
   // dancing caustics on the streambed (two scrolling reads, min() sharpens)
-  float cWet = smoothstep( 0.05, -0.35, vWy );
+  float cWet = 1.0 - smoothstep( -0.35, 0.05, vWy );
   if ( cWet > 0.0 ) {
     float ca = texture2D( tCaustic, vNormalMapUv * 110.0 + uTime * vec2( 0.05, 0.07 ) ).r;
     float cb = texture2D( tCaustic, vNormalMapUv * 86.0 - uTime * vec2( 0.06, 0.035 ) ).r;
@@ -73,8 +73,11 @@ export function createTerrain(hf, anisotropy = 4) {
       Math.max(0, patches(x * 0.02, z * 0.02, 3) - 0.42) * 1.4;
     if (y < WATER_Y) dirt += 2;
     for (const s of hf.sites) {
-      const d = Math.hypot(x - s.x, z - s.z);
-      if (d < 9) dirt += clamp01((9 - d) / 5) * 0.7; // worn ground at buildings
+      const dx = x - s.x;
+      const dz = z - s.z;
+      const d2 = dx * dx + dz * dz;
+      // worn ground at buildings
+      if (d2 < 81) dirt += clamp01((9 - Math.sqrt(d2)) / 5) * 0.7;
     }
     const pd = pathDist(x, z);
     if (pd < 2.4) dirt += clamp01((2.4 - pd) / 1.5) * 0.85; // worn paths
@@ -122,6 +125,8 @@ export function createTerrain(hf, anisotropy = 4) {
     l.map.anisotropy = anisotropy;
     l.nor.anisotropy = anisotropy;
   }
+  // generated here, not inside onBeforeCompile: compile runs mid-first-frame
+  const caustic = causticTexture(hf.seed);
 
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -139,7 +144,7 @@ export function createTerrain(hf, anisotropy = 4) {
       tRock: { value: T.rock.map },
       tRockN: { value: T.rock.nor },
       tBreak: { value: T.breakup },
-      tCaustic: { value: causticTexture(hf.seed) },
+      tCaustic: { value: caustic },
       uTime,
     });
     s.vertexShader = s.vertexShader

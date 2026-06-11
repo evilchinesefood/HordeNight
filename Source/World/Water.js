@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { WORLD_SIZE, HALF, WATER_Y } from "../Core/Heightfield.js";
 import { waterNormalTexture, softNoiseTexture } from "../Engine/Textures.js";
+import { RES } from "./Terrain.js";
 
-// terrain-height lookup shared with the grass shader (385x385 grid texture)
+// terrain-height lookup shared with the grass shader (RES+1 grid texture)
 const HUV = (xz) =>
-  `( ( ${xz} + ${HALF}.0 ) / ${WORLD_SIZE}.0 * 384.0 + 0.5 ) / 385.0`;
+  `( ( ${xz} + ${HALF}.0 ) / ${WORLD_SIZE}.0 * ${RES}.0 + 0.5 ) / ${RES + 1}.0`;
 
 const WATER_FRAG = `
   vec2 wUv = vWPos.xz;
@@ -46,6 +47,7 @@ const WATER_NORMAL = `
 
 export function createWater(heightTex) {
   const tex = waterNormalTexture();
+  const noise = softNoiseTexture(); // not inside onBeforeCompile: compile runs mid-frame
   const uTime = { value: 0 };
 
   const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, 1, 1);
@@ -62,7 +64,7 @@ export function createWater(heightTex) {
     Object.assign(s.uniforms, {
       uTime,
       uHeightTex: { value: heightTex },
-      uNoise: { value: softNoiseTexture() },
+      uNoise: { value: noise },
     });
     s.vertexShader = s.vertexShader
       .replace("#include <common>", "#include <common>\nvarying vec3 vWPos;")

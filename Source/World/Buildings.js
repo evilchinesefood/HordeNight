@@ -173,12 +173,16 @@ function shell(g, solids, wallMat, MAT, opt) {
   wall(W, H, T, 0, H / 2, -zf);
   wall(T, H, D - 2 * T, -(W - T) / 2, H / 2, 0);
   wall(T, H, D - 2 * T, (W - T) / 2, H / 2, 0);
-  // floor (step-band standable) + ceiling
+  // floor (step-band standable; interior-only so hugging an outside wall
+  // doesn't hoist the player onto a 12cm phantom ledge) + ceiling
   g.add(box(W - 0.06, 0.12, D - 0.06, MAT.wood, 0, 0.06, 0));
-  solids.push({ w: W, d: D, x: 0, z: 0, h: 0.12 });
+  solids.push({ w: W - 2 * T, d: D - 2 * T, x: 0, z: 0, h: 0.12 });
   g.add(box(W, 0.1, D, MAT.wood, 0, H + 0.05, 0));
+  // double-sided caps: the attic gable is visible during indoor jumps
+  const capMat = wallMat.clone();
+  capMat.side = THREE.DoubleSide;
   for (const zc of [zf + T / 2 - 0.01, -(zf + T / 2 - 0.01)]) {
-    const cap = new THREE.Mesh(gableCapGeo(W, roofH), wallMat);
+    const cap = new THREE.Mesh(gableCapGeo(W, roofH), capMat);
     cap.position.set(0, H, zc);
     if (zc < 0) cap.rotation.y = Math.PI;
     g.add(cap);
@@ -213,7 +217,7 @@ function cabin(MAT, seed) {
   const chH = H + 1.1;
   g.add(box(0.55, chH, 0.55, MAT.stone, W / 2 + 0.2, chH / 2, -D / 4));
   solids.push({ w: 0.55, d: 0.55, x: W / 2 + 0.2, z: -D / 4, h: chH });
-  return { group: g, solids };
+  return { group: g, solids, pads: [{ x: 0, z: 0, w: W, d: D }] };
 }
 
 function barn(MAT, seed) {
@@ -232,11 +236,11 @@ function barn(MAT, seed) {
     doorH: 2.9,
     doorOff: 0,
   });
-  // loft window + white door trim
-  g.add(box(0.9, 0.9, 0.06, MAT.dark, 0, H + 0.7, D / 2 + 0.42));
+  // loft window (embedded through the gable cap plane at D/2 - 0.01) + door trim
+  g.add(box(0.9, 0.9, 0.06, MAT.dark, 0, H + 0.7, D / 2));
   g.add(box(0.18, 3, 0.16, MAT.wood, -1.42, 1.5, D / 2 + 0.02));
   g.add(box(0.18, 3, 0.16, MAT.wood, 1.42, 1.5, D / 2 + 0.02));
-  return { group: g, solids };
+  return { group: g, solids, pads: [{ x: 0, z: 0, w: W, d: D }] };
 }
 
 // small open-front lean-to: 3 walls, tilted plank roof
@@ -259,7 +263,7 @@ function shed(MAT, seed) {
   const roof = box(W + 0.5, 0.1, D + 0.7, MAT.wood, 0, H + 0.18, -0.1);
   roof.rotation.x = 0.16;
   g.add(roof);
-  return { group: g, solids };
+  return { group: g, solids, pads: [{ x: 0, z: 0, w: W, d: D }] };
 }
 
 function ruin(MAT, seed) {
@@ -275,7 +279,8 @@ function ruin(MAT, seed) {
   for (const [wx, wz, w, d] of walls) {
     const h = 0.7 + rng() * 2;
     g.add(box(w, h, d, MAT.stone, wx, h / 2, wz));
-    solids.push({ w, h: h + 0.2, d, x: wx, z: wz });
+    // collider top matches the mesh (group sinks 0.06): standable, no hover
+    solids.push({ w, h: h - 0.06, d, x: wx, z: wz });
   }
   for (let i = 0; i < 7; i++) {
     const s = 0.25 + rng() * 0.5;
@@ -346,7 +351,7 @@ function well(MAT) {
   return g;
 }
 
-function addProps(hf, group, circles, MAT) {
+function addProps(hf, group, circles, MAT, boxes) {
   const rng = Mulberry(hf.seed + 83);
   const posts = [];
   const rails = [];
@@ -354,6 +359,13 @@ function addProps(hf, group, circles, MAT) {
   const logs = [];
   const propWood = MAT.wood.clone();
   propWood.vertexColors = false;
+  // hollow interiors made building overlaps visible: candidates inside a
+  // building AABB are skipped (placement only - RNG draw order is unchanged)
+  const inBuilding = (x, z, r) =>
+    boxes.some(
+      (b) =>
+        x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r,
+    );
 
   for (const s of hf.sites) {
     if (s.type === "ruin" || s.type === "tower") continue;
@@ -369,6 +381,7 @@ function addProps(hf, group, circles, MAT) {
       for (let k = 0; k <= segs; k++) {
         const py = hf.heightAt(px, pz);
         if (py < 0.5) break; // ran into the stream valley
+        if (inBuilding(px, pz, 0.45)) break; // run would pierce a wall
         const cur = { x: px, y: py, z: pz };
         posts.push(cur);
         circles.push({ x: px, z: pz, r: 0.18, topY: py + 1.05 });
@@ -400,8 +413,11 @@ function addProps(hf, group, circles, MAT) {
       const r = 3.6 + rng() * 3;
       const bx = s.x + Math.cos(a) * r;
       const bz = s.z + Math.sin(a) * r;
+      const bs = 0.8 + rng() * 0.35;
+      // the 3.6-6.6 ring can land inside the randomized barn (half-diag ~6.8)
+      if (inBuilding(bx, bz, 0.45)) continue;
       const by = hf.heightAt(bx, bz);
-      barrels.push({ x: bx, y: by, z: bz, s: 0.8 + rng() * 0.35 });
+      barrels.push({ x: bx, y: by, z: bz, s: bs });
       circles.push({ x: bx, z: bz, r: 0.42, topY: by + 1 });
     }
   }
@@ -412,9 +428,10 @@ function addProps(hf, group, circles, MAT) {
     const a = rng() * Math.PI * 2;
     const cx = s.x + Math.cos(a) * 5.5;
     const cz = s.z + Math.sin(a) * 5.5;
-    const cy = hf.heightAt(cx, cz);
     const rot = rng() * Math.PI;
     const side = rot + Math.PI / 2;
+    if (inBuilding(cx, cz, 1.0)) continue;
+    const cy = hf.heightAt(cx, cz);
     // prettier-ignore
     for (const [o, oy] of [[-0.3, 0.14], [0, 0.14], [0.3, 0.14], [-0.15, 0.4], [0.15, 0.4], [0, 0.66]]) {
       logs.push({
@@ -495,10 +512,12 @@ function addProps(hf, group, circles, MAT) {
     const a = Mulberry(hf.seed + 91)() * Math.PI * 2;
     const wx = w.x + Math.cos(a) * 6.5;
     const wz = w.z + Math.sin(a) * 6.5;
-    const wg = mergeGroup(well(MAT));
-    wg.position.set(wx, hf.heightAt(wx, wz) - 0.05, wz);
-    group.add(wg);
-    circles.push({ x: wx, z: wz, r: 1.15, topY: wg.position.y + 1 });
+    if (!inBuilding(wx, wz, 1.2)) {
+      const wg = mergeGroup(well(MAT));
+      wg.position.set(wx, hf.heightAt(wx, wz) - 0.05, wz);
+      group.add(wg);
+      circles.push({ x: wx, z: wz, r: 1.15, topY: wg.position.y + 1 });
+    }
   }
 }
 
@@ -507,6 +526,7 @@ export function createBuildings(hf) {
   const group = new THREE.Group();
   const colliders = [];
   const circles = [];
+  const interiors = []; // roofed footprints (rain occlusion etc.)
   const v = new THREE.Vector3();
   const builders = {
     cabin: (seed) => cabin(MAT, seed),
@@ -516,26 +536,28 @@ export function createBuildings(hf) {
     shed: (seed) => shed(MAT, seed),
   };
 
-  const place = ({ group: raw, solids }, x, y, z, rot) => {
+  const place = ({ group: raw, solids, pads = [] }, x, y, z, rot) => {
     const g = mergeGroup(raw);
     g.position.set(x, y - 0.06, z);
     g.rotation.y = rot;
     group.add(g);
     g.updateMatrixWorld(true);
-    for (const s of solids) {
-      // local solid center -> world (rotation is a multiple of 90deg, AABB stays valid)
+    // local center -> world (rotation is a multiple of 90deg, AABB stays valid)
+    const aabb = (s, out) => {
       v.set(s.x || 0, 0, s.z || 0).applyMatrix4(g.matrixWorld);
       const w = rot % Math.PI === 0 ? s.w : s.d;
       const d = rot % Math.PI === 0 ? s.d : s.w;
-      colliders.push({
+      out.push({
         minX: v.x - w / 2,
         maxX: v.x + w / 2,
         minZ: v.z - d / 2,
         maxZ: v.z + d / 2,
         minY: y + (s.y0 ?? -1),
-        maxY: y + s.h,
+        maxY: y + (s.h ?? 0),
       });
-    }
+    };
+    for (const s of solids) aabb(s, colliders);
+    for (const p of pads) aabb(p, interiors);
   };
 
   hf.sites.forEach((site, i) => {
@@ -571,7 +593,7 @@ export function createBuildings(hf) {
     }
   });
 
-  addProps(hf, group, circles, MAT);
+  addProps(hf, group, circles, MAT, colliders);
 
   group.traverse((o) => {
     if (o.isMesh) {
@@ -580,5 +602,5 @@ export function createBuildings(hf) {
     }
   });
 
-  return { group, colliders, circles };
+  return { group, colliders, circles, interiors };
 }

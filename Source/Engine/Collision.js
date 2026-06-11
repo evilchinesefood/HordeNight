@@ -3,22 +3,31 @@
 // colliders whose top is within this of the feet are stepped onto, not pushed
 export const STEP_UP = 0.35;
 
-// highest collider top the player could stand on at (px,pz); -Infinity if none
-export function standHeight(px, pz, r, feetY, boxes, circles) {
+// highest collider top the player could stand on at (px,pz); -Infinity if none.
+// prevFeetY: feet height before this frame's fall - a top crossed from above
+// in a single low-fps frame must stay standable or fast falls slide off
+export function standHeight(
+  px,
+  pz,
+  r,
+  feetY,
+  boxes,
+  circles,
+  prevFeetY = feetY,
+) {
   let top = -Infinity;
   for (const b of boxes) {
-    if (b.maxY > feetY + STEP_UP) continue;
-    if (
-      px > b.minX - r &&
-      px < b.maxX + r &&
-      pz > b.minZ - r &&
-      pz < b.maxZ + r
-    ) {
-      top = Math.max(top, b.maxY);
-    }
+    if (b.maxY > feetY + STEP_UP && b.maxY > prevFeetY) continue;
+    // exact circle-vs-AABB: the per-axis expansion let players stand on air
+    // diagonally off box corners
+    const cx = Math.max(b.minX, Math.min(px, b.maxX));
+    const cz = Math.max(b.minZ, Math.min(pz, b.maxZ));
+    const dx = px - cx;
+    const dz = pz - cz;
+    if (dx * dx + dz * dz < r * r) top = Math.max(top, b.maxY);
   }
   for (const c of circles) {
-    if (c.topY > feetY + STEP_UP) continue;
+    if (c.topY > feetY + STEP_UP && c.topY > prevFeetY) continue;
     const dx = px - c.x;
     const dz = pz - c.z;
     if (dx * dx + dz * dz < (r + c.r) * (r + c.r)) top = Math.max(top, c.topY);
@@ -61,12 +70,23 @@ export function resolveCircleCircle(px, pz, r, c) {
   return { x: (dx / d) * push, z: (dz / d) * push };
 }
 
-export function resolvePlayer(px, pz, r, feetY, headY, boxes, circles) {
+export function resolvePlayer(
+  px,
+  pz,
+  r,
+  feetY,
+  headY,
+  boxes,
+  circles,
+  prevFeetY = feetY,
+) {
   let x = px;
   let z = pz;
   for (let pass = 0; pass < 2; pass++) {
     for (const b of boxes) {
-      if (feetY > b.maxY - STEP_UP || headY < b.minY) continue;
+      // prevFeetY >= maxY: crossed the top from above this frame -> land, don't push
+      if (feetY > b.maxY - STEP_UP || prevFeetY >= b.maxY || headY < b.minY)
+        continue;
       const p = resolveCircleAabb(x, z, r, b);
       if (p) {
         x += p.x;
@@ -74,7 +94,7 @@ export function resolvePlayer(px, pz, r, feetY, headY, boxes, circles) {
       }
     }
     for (const c of circles) {
-      if (feetY > c.topY - STEP_UP) continue;
+      if (feetY > c.topY - STEP_UP || prevFeetY >= c.topY) continue;
       const p = resolveCircleCircle(x, z, r, c);
       if (p) {
         x += p.x;
