@@ -13,7 +13,7 @@ const JUMP = 7.6;
 const LOOK_SPEED = 0.0022;
 
 export class Player {
-  constructor(camera, input, hf, boxes, trunks, spawn) {
+  constructor(camera, input, hf, boxes, trunks, spawn, events = {}) {
     this.camera = camera;
     this.input = input;
     this.hf = hf;
@@ -29,6 +29,10 @@ export class Player {
     this.yaw = spawn.yaw ?? 0;
     this.pitch = 0;
     this.grounded = true;
+    this.events = events;
+    this.stride = 0;
+    this.bobPhase = 0;
+    this.landDip = 0;
     this.update(0);
   }
 
@@ -88,6 +92,10 @@ export class Player {
 
     const ground = this.hf.heightAt(this.pos.x, this.pos.z);
     if (this.pos.y <= ground) {
+      if (!this.grounded && this.vel.y < -5) {
+        this.landDip = Math.min(0.16, -this.vel.y * 0.014);
+        if (this.events.onLand) this.events.onLand(-this.vel.y);
+      }
       this.pos.y = ground;
       this.vel.y = 0;
       this.grounded = true;
@@ -100,7 +108,25 @@ export class Player {
       }
     }
 
-    this.camera.position.set(this.pos.x, this.pos.y + EYE, this.pos.z);
+    // movement feel: stride steps, subtle head-bob, landing dip
+    const speedH = Math.hypot(this.vel.x, this.vel.z);
+    if (this.grounded && speedH > 1) {
+      this.stride += speedH * dt;
+      if (this.stride > (speedH > 6.5 ? 2.6 : 2.1)) {
+        this.stride = 0;
+        if (this.events.onStep) this.events.onStep(speedH > 6.5);
+      }
+      this.bobPhase += dt * (5 + speedH * 0.6);
+    }
+    const bob =
+      Math.sin(this.bobPhase * 2) * 0.024 * Math.min(speedH / 5.2, 1.5);
+    this.landDip *= Math.exp(-7 * dt);
+
+    this.camera.position.set(
+      this.pos.x,
+      this.pos.y + EYE + bob - this.landDip,
+      this.pos.z,
+    );
     this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
   }
 }

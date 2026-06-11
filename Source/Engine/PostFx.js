@@ -44,7 +44,7 @@ export function createPostFx(renderer, scene, camera, { ao = true } = {}) {
     composer.addPass(gtao);
   }
 
-  const bloom = new UnrealBloomPass(size, 0.13, 0.25, 1.2);
+  const bloom = new UnrealBloomPass(size, 0.1, 0.25, 1.25);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 

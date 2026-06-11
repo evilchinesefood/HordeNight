@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { HALF, WATER_Y } from "../Core/Heightfield.js";
 import { Mulberry } from "../Core/Rng.js";
+import { rockSurfaceSet } from "../Engine/Textures.js";
 
 const ROCK_COUNT = 320;
 const LOG_COUNT = 16;
@@ -44,7 +45,12 @@ export function createClutter(hf) {
     Math.abs(hf.heightAt(x, z + 2) - hf.heightAt(x, z - 2));
 
   // --- rocks: denser on steep/rocky ground, a few on the banks ---
-  const rockMat = new THREE.MeshStandardMaterial({ roughness: 0.95 });
+  const rockTex = rockSurfaceSet(hf.seed + 61);
+  const rockMat = new THREE.MeshStandardMaterial({
+    map: rockTex.map,
+    normalMap: rockTex.nor,
+    roughness: 0.95,
+  });
   const rocks = new THREE.InstancedMesh(rockGeo(), rockMat, ROCK_COUNT);
   let placed = 0;
   for (let i = 0; i < ROCK_COUNT * 8 && placed < ROCK_COUNT; i++) {

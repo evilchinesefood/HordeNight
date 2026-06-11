@@ -622,6 +622,92 @@ export function barrelTextureSet(seed = 37) {
   );
 }
 
+// natural rock surface for boulders (patches + cracks + speckles)
+export function rockSurfaceSet(seed = 61) {
+  return makeLayer(
+    seed,
+    256,
+    "#7f7d78",
+    (a, h, rng, S) => {
+      for (let i = 0; i < 70; i++) {
+        const x = rng() * S,
+          y = rng() * S,
+          r = 10 + rng() * 20;
+        wrapDot(a, S, x, y, r, rng() < 0.5 ? "#6b6a66" : "#8f8d88", 0.25);
+        wrapDot(
+          h,
+          S,
+          x,
+          y,
+          r,
+          rng() < 0.5 ? "rgb(114,114,114)" : "rgb(142,142,142)",
+          0.3,
+        );
+      }
+      for (let i = 0; i < 20; i++) {
+        const pts = [[rng() * S, rng() * S]];
+        for (let k = 0; k < 3 + rng() * 3; k++) {
+          const [px, py] = pts[pts.length - 1];
+          const ang = rng() * Math.PI * 2;
+          pts.push([
+            px + Math.cos(ang) * (12 + rng() * 20),
+            py + Math.sin(ang) * (12 + rng() * 20),
+          ]);
+        }
+        wrapStroke(a, S, pts, "#55534f", 0.5, 1 + rng() * 1.5);
+        wrapStroke(h, S, pts, "rgb(88,88,88)", 0.7, 1.5 + rng() * 1.5);
+      }
+      for (let i = 0; i < 240; i++) {
+        const x = rng() * S,
+          y = rng() * S,
+          r = 0.6 + rng();
+        wrapDot(a, S, x, y, r, rng() < 0.5 ? "#93918c" : "#67655f", 0.55);
+        wrapDot(
+          h,
+          S,
+          x,
+          y,
+          r,
+          rng() < 0.5 ? "rgb(158,158,158)" : "rgb(104,104,104)",
+          0.55,
+        );
+      }
+    },
+    3.0,
+  );
+}
+
+// dense tiny-leaf surface for shrubs
+export function shrubTextureSet(seed = 63) {
+  const set = makeLayer(
+    seed,
+    256,
+    "#3c5524",
+    (a, h, rng, S) => {
+      for (let i = 0; i < 340; i++) {
+        const x = rng() * S,
+          y = rng() * S,
+          r = 2.5 + rng() * 4.5;
+        const g = 90 + rng() * 70;
+        wrapDot(a, S, x, y, r, `rgb(${g * 0.52},${g},${g * 0.4})`, 0.7);
+        wrapDot(
+          h,
+          S,
+          x,
+          y,
+          r,
+          rng() < 0.5 ? "rgb(108,108,108)" : "rgb(152,152,152)",
+          0.6,
+        );
+      }
+    },
+    2.6,
+  );
+  set.map.repeat.set(2, 2);
+  set.nor.repeat.set(2, 2);
+  return set;
+}
+
 // blobby tileable gray noise (foam masks etc)
 export function softNoiseTexture(seed = 21) {
   const S = 128;

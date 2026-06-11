@@ -55,6 +55,14 @@ export class AudioAmbience {
     const water = ctx.createBufferSource();
     water.buffer = noiseBuffer(ctx, 4, false);
     water.loop = true;
+    // short decaying noise burst reused for footsteps and landings
+    const sb = ctx.createBuffer(1, (ctx.sampleRate * 0.12) | 0, ctx.sampleRate);
+    const sd = sb.getChannelData(0);
+    for (let i = 0; i < sd.length; i++) {
+      sd[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / sd.length, 2.2);
+    }
+    this.stepBuf = sb;
+
     const bp = ctx.createBiquadFilter();
     bp.type = "bandpass";
     bp.frequency.value = 900;
@@ -63,6 +71,34 @@ export class AudioAmbience {
     this.waterGain.gain.value = 0;
     water.connect(bp).connect(this.waterGain).connect(this.master);
     water.start();
+  }
+
+  thud(rate, freq, vol) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.stepBuf;
+    src.playbackRate.value = rate;
+    const f = ctx.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.value = vol;
+    src.connect(f).connect(g).connect(this.master);
+    src.start(ctx.currentTime);
+  }
+
+  step(sprint) {
+    if (!this.started) return;
+    this.thud(
+      0.8 + Math.random() * 0.35,
+      320 + Math.random() * 180 + (sprint ? 140 : 0),
+      sprint ? 0.34 : 0.22,
+    );
+  }
+
+  land(speed) {
+    if (!this.started) return;
+    this.thud(0.5, 240, Math.min(0.55, 0.1 + speed * 0.045));
   }
 
   chirp() {

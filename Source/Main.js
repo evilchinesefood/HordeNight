@@ -67,6 +67,10 @@ const player = new Player(
   buildings.colliders,
   [...veg.trunkColliders, ...clutter.circles, ...buildings.circles],
   spawn,
+  {
+    onStep: (sprint) => audio.step(sprint),
+    onLand: (speed) => audio.land(speed),
+  },
 );
 
 const overlay = document.getElementById("Overlay");

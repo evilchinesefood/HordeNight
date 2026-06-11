@@ -60,7 +60,7 @@ THREE.ShaderChunk.fog_fragment = /* glsl */ `
   fogFactor *= mix( 0.45, 1.0, fogH );
   vec3 fogViewDir = normalize( vFogWorldPos - cameraPosition );
   float fogSun = pow( max( dot( fogViewDir, uFogSunDir ), 0.0 ), 6.0 );
-  vec3 fogCol = mix( fogColor, uFogSunColor, fogSun * 0.7 );
+  vec3 fogCol = mix( fogColor, uFogSunColor, fogSun * 0.6 );
   gl_FragColor.rgb = mix( gl_FragColor.rgb, fogCol, fogFactor );
 #endif`;
 

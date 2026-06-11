@@ -8,12 +8,13 @@ import {
   softNoiseTexture,
   leafClusterTexture,
   impostorCardTexture,
+  shrubTextureSet,
 } from "../Engine/Textures.js";
 
 const TREE_TRIES = 9000;
 const TREE_CELL = 5;
 const TREE_CAP = 1500;
-const CHUNKS = 8; // NxN world grid per variant so camera + shadow frustums can cull
+const CHUNKS = 10; // NxN world grid per variant so camera + shadow frustums can cull
 const HANDOFF = 88; // chunk-center distance where full detail swaps to impostors
 const SHRUB_COUNT = 280;
 const GRASS_TILE = 64;
@@ -318,7 +319,8 @@ export function createVegetation(hf, heightTex) {
         vec2 gUv = ( ( gWp + ${HALF}.0 ) / ${HALF * 2}.0 * 384.0 + 0.5 ) / 385.0;
         vec4 gHs = texture2D( uHeightTex, gUv );
         float gDist = distance( gWp, uCamPos.xz );
-        float gFade = ( 1.0 - smoothstep( 14.0, 25.0, gDist ) ) * smoothstep( 0.3, 0.55, gHs.g );
+        float gJit = texture2D( uNoise, gWp * 0.13 ).r - 0.5;
+        float gFade = ( 1.0 - smoothstep( 14.0, 25.0, gDist ) ) * smoothstep( 0.28, 0.6, gHs.g + gJit * 0.35 );
         gFade *= 1.0 - step( 198.0, max( abs( gWp.x ), abs( gWp.y ) ) );
         transformed = gRs * transformed * gFade;
         float gBend = uv.y * uv.y * gFade;
@@ -373,7 +375,12 @@ export function createVegetation(hf, heightTex) {
   const shrubGeo = new THREE.IcosahedronGeometry(0.55, 1)
     .scale(1.2, 0.75, 1.2)
     .translate(0, 0.32, 0);
-  const shrubMat = new THREE.MeshStandardMaterial({ roughness: 1 });
+  const shrubTex = shrubTextureSet(hf.seed + 63);
+  const shrubMat = new THREE.MeshStandardMaterial({
+    map: shrubTex.map,
+    normalMap: shrubTex.nor,
+    roughness: 1,
+  });
   const shrubs = new THREE.InstancedMesh(shrubGeo, shrubMat, SHRUB_COUNT);
   let sp = 0;
   for (let i = 0; i < SHRUB_COUNT * 5 && sp < SHRUB_COUNT; i++) {
@@ -389,7 +396,7 @@ export function createVegetation(hf, heightTex) {
     shrubs.setMatrixAt(sp, m);
     shrubs.setColorAt(
       sp,
-      col.setHSL(0.25 + rng() * 0.04, 0.42, 0.3 + rng() * 0.12),
+      col.setHSL(0.25 + rng() * 0.04, 0.42, 0.45 + rng() * 0.15),
     );
     sp++;
   }
