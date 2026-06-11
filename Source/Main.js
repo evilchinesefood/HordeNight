@@ -253,8 +253,8 @@ renderer.setAnimationLoop(() => {
 window.HN = { player, hf, scene, renderer, camera, veg, weather, sky };
 const tp = new URLSearchParams(location.search).get("tp");
 if (tp) {
-  const [x, z, yaw, pitch] = tp.split(",").map(Number);
-  player.pos.set(x, hf.heightAt(x, z), z);
+  const [x, z, yaw, pitch, up] = tp.split(",").map(Number);
+  player.pos.set(x, hf.heightAt(x, z) + (up || 0), z);
   player.yaw = yaw || 0;
   player.pitch = pitch || 0;
   player.update(0);

@@ -48,7 +48,7 @@ function makeMats() {
     log: std(plankTextureSet(31)),
     wood: std(plankTextureSet(41, "#7d6e5a")),
     barn: std(plankTextureSet(51, "#7d3b2c", "#7a5f3e")),
-    roof: std(shingleTextureSet(33)),
+    roof: std(shingleTextureSet(33), { side: THREE.DoubleSide }),
     stone: std(stoneTextureSet(35)),
     barrel: std(barrelTextureSet(37), { vertexColors: false }),
     dark: new THREE.MeshStandardMaterial({
@@ -106,6 +106,18 @@ function roofGeo(w, h, d) {
   const v = [
     -x,0,z,  0,h,z,  0,h,-z,   -x,0,z,  0,h,-z, -x,0,-z,
     x,0,z,  x,0,-z, 0,h,-z,    x,0,z,  0,h,-z,  0,h,z,
+  ];
+  return soupGeo(v, (_, py, pz) => [pz * 0.35, py * 0.5]);
+}
+
+// plank sheathing under the roof slopes (reversed winding, faces down)
+function roofUnderGeo(w, h, d) {
+  const x = w / 2;
+  const z = d / 2;
+  // prettier-ignore
+  const v = [
+    -x,0,z,  0,h,-z, 0,h,z,    -x,0,z, -x,0,-z,  0,h,-z,
+    x,0,z,  0,h,-z,  x,0,-z,   x,0,z,  0,h,z,   0,h,-z,
   ];
   return soupGeo(v, (_, py, pz) => [pz * 0.35, py * 0.5]);
 }
@@ -169,6 +181,9 @@ function shell(g, solids, wallMat, MAT, opt) {
   const roof = new THREE.Mesh(roofGeo(W + 0.7, roofH, D + 0.8), MAT.roof);
   roof.position.y = H;
   g.add(roof);
+  const under = new THREE.Mesh(roofUnderGeo(W + 0.7, roofH, D + 0.8), MAT.wood);
+  under.position.y = H - 0.04;
+  g.add(under);
 }
 
 function cabin(MAT, seed) {

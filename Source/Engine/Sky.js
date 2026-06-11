@@ -59,8 +59,8 @@ THREE.ShaderChunk.fog_fragment = /* glsl */ `
   float fogH = exp( -max( vFogWorldPos.y - uFogBaseY, 0.0 ) * uFogHeightDecay );
   fogFactor *= mix( 0.45, 1.0, fogH );
   vec3 fogViewDir = normalize( vFogWorldPos - cameraPosition );
-  float fogSun = pow( max( dot( fogViewDir, uFogSunDir ), 0.0 ), 6.0 );
-  vec3 fogCol = mix( fogColor, uFogSunColor, fogSun * 0.6 );
+  float fogSun = pow( max( dot( fogViewDir, uFogSunDir ), 0.0 ), 24.0 );
+  vec3 fogCol = mix( fogColor, uFogSunColor, fogSun * 0.45 );
   gl_FragColor.rgb = mix( gl_FragColor.rgb, fogCol, fogFactor );
 #endif`;
 
@@ -160,11 +160,17 @@ export function createSky(scene) {
   const sky = new Sky();
   sky.scale.setScalar(2000);
   const u = sky.material.uniforms;
-  u.turbidity.value = 4;
+  u.turbidity.value = 3;
   u.rayleigh.value = 1.8;
-  u.mieCoefficient.value = 0.0015;
-  u.mieDirectionalG.value = 0.93; // tight forward lobe: small natural disk
+  u.mieCoefficient.value = 0.002;
+  u.mieDirectionalG.value = 0.8;
   u.sunPosition.value.copy(SUN_DIR);
+  // the raw solar disk is ~19000x over white: clamp the dome's HDR output
+  // so UnrealBloom doesn't smear it into a sky-wide supernova
+  sky.material.fragmentShader = sky.material.fragmentShader.replace(
+    "gl_FragColor = vec4( retColor, 1.0 );",
+    "gl_FragColor = vec4( min( retColor, vec3( 5.0 ) ), 1.0 );",
+  );
   scene.add(sky);
 
   // cool base haze; the fog patch warms it toward the sun
@@ -197,8 +203,8 @@ export function createSky(scene) {
   );
   // overcast blend for weather: hazy turbid dome grays the sun glow
   const setOvercast = (w) => {
-    u.turbidity.value = 4 + w * 16;
-    u.mieCoefficient.value = 0.0015 + w * 0.004;
+    u.turbidity.value = 3 + w * 17;
+    u.mieCoefficient.value = 0.002 + w * 0.004;
     u.rayleigh.value = 1.8 - w * 1.1;
   };
   const setNight = (on) => {

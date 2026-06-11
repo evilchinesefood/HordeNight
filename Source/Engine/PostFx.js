@@ -46,8 +46,8 @@ export function createPostFx(renderer, scene, camera, { ao = true } = {}) {
     composer.addPass(gtao);
   }
 
-  const bloom = new UnrealBloomPass(size, 0.1, 0.25, 1.25);
-  composer.addPass(bloom);
+  const bloom = new UnrealBloomPass(size, 0.1, 0.25, 2.6);
+  if (!location.search.includes("nobloom")) composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
   const vignette = new ShaderPass(VignetteShader);
