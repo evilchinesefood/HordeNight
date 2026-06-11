@@ -188,15 +188,18 @@ export function createSky(scene) {
       "Sky shader patch needles missing - a three upgrade changed Sky.js; the supernova sun is back",
     );
   sky.material.fragmentShader = skyFrag
+    .replace("void main() {", "uniform float uDim;\nvoid main() {")
     .replace(
       KNEE_NEEDLE,
       `float skyL = dot( retColor, vec3( 0.2126, 0.7152, 0.0722 ) );
       float skyK = skyL < 0.85 ? skyL
         : skyL < 12.0 ? 0.85 + ( skyL - 0.85 ) * 0.18
         : 2.857 + ( skyL - 12.0 ) * 0.0004;
-      gl_FragColor = vec4( retColor * ( skyK / max( skyL, 1e-4 ) ), 1.0 );`,
+      gl_FragColor = vec4( retColor * ( skyK / max( skyL, 1e-4 ) ) * uDim, 1.0 );`,
     )
-    .replace(DISK_NEEDLE, "const float sunAngularDiameterCos = 0.9999893;");
+    // 0.9999833 = day disk 25% wider than the 0.9999893 tuning
+    .replace(DISK_NEEDLE, "const float sunAngularDiameterCos = 0.9999833;");
+  u.uDim = { value: 1 }; // storm dome dimmer (setOvercast)
   scene.add(sky);
 
   // cool base haze; the fog patch warms it toward the sun
@@ -235,9 +238,10 @@ export function createSky(scene) {
   // NOTE: weather calls this every frame - w=0 MUST equal the clear-sky
   // uniforms above or it silently overrides any tuning
   const setOvercast = (w) => {
-    u.turbidity.value = CLEAR.turbidity + w * 17;
+    u.turbidity.value = CLEAR.turbidity + w * 22;
     u.mieCoefficient.value = CLEAR.mie + w * 0.007;
-    u.rayleigh.value = CLEAR.rayleigh - w * 0.32;
+    u.rayleigh.value = CLEAR.rayleigh - w * 0.46; // blue dies fully in a storm
+    u.uDim.value = 1 - w * 0.55; // and the dome itself darkens
     clouds.setTone(cloudTone(w));
   };
   const setNight = (on) => {

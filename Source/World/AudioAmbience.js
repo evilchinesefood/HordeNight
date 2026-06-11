@@ -149,7 +149,8 @@ export class AudioAmbience {
     }
   }
 
-  update(dt, streamDistance, rain = 0) {
+  // rain: audible streak mix (fades indoors); storm: raw weather intensity
+  update(dt, streamDistance, rain = 0, storm = rain) {
     if (!this.started) return;
     this.waterTimer = (this.waterTimer || 0) - dt;
     if (this.waterTimer <= 0) {
@@ -166,7 +167,7 @@ export class AudioAmbience {
     this.birdTimer -= dt;
     if (this.birdTimer <= 0) {
       this.birdTimer = 3 + Math.random() * 8;
-      this.chirp();
+      if (storm < 0.15) this.chirp(); // birds shelter while it rains
     }
   }
 }

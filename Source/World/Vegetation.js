@@ -491,7 +491,8 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
   for (let i = 0; i < GRASS_COUNT; i++) {
     const s = 0.55 + rng() * 0.75;
     m.makeRotationY(rng() * Math.PI * 2);
-    m.scale(v.set(s, s * (0.8 + rng() * 0.5), s));
+    // height spread: 30%..100% of the old max (1.3), same draw count
+    m.scale(v.set(s, s * 1.3 * (0.3 + rng() * 0.7), s));
     m.setPosition((rng() - 0.5) * GRASS_TILE, 0, (rng() - 0.5) * GRASS_TILE);
     grass.setMatrixAt(i, m);
   }

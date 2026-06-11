@@ -308,7 +308,12 @@ renderer.setAnimationLoop(() => {
   terrain.update(elapsed);
   veg.update(elapsed, player.pos, weather.gust);
   if (sky.update(player.pos, elapsed)) renderer.shadowMap.needsUpdate = true;
-  audio.update(dt, hf.streamDist(player.pos.x, player.pos.z), weather.visMix);
+  audio.update(
+    dt,
+    hf.streamDist(player.pos.x, player.pos.z),
+    weather.visMix,
+    weather.intensity,
+  );
   if (statsHud) {
     renderer.info.reset();
     statsHud.tick();
