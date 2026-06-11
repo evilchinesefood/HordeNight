@@ -1,6 +1,6 @@
 # HordeNight
 
-First-person 3D zombie-survival game (7 Days to Die-inspired) built with [Three.js](https://threejs.org/) and Vite. Full design: [docs/superpowers/specs/2026-06-10-hordenight-design.md](docs/superpowers/specs/2026-06-10-hordenight-design.md).
+First-person 3D zombie-survival game (7 Days to Die-inspired) built with [Three.js](https://threejs.org/) and Vite.
 
 ## What's in the world
 
