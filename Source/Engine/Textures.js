@@ -143,6 +143,43 @@ export function impostorCardTexture(seed = 3, pine = false) {
   return tex;
 }
 
+// soft cloud puff: layered radial gradients on transparent bg
+export function cloudTexture(seed = 8) {
+  const S = 256;
+  const rng = Mulberry(seed);
+  const [c, ctx] = canvas(S);
+  ctx.clearRect(0, 0, S, S);
+  const blob = (x, y, r, a) => {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(255,255,255,${a})`);
+    g.addColorStop(0.55, `rgba(252,250,246,${a * 0.55})`);
+    g.addColorStop(1, "rgba(250,248,244,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  for (let i = 0; i < 7; i++) {
+    blob(
+      S * (0.25 + rng() * 0.5),
+      S * (0.42 + rng() * 0.2),
+      S * (0.14 + rng() * 0.12),
+      0.5 + rng() * 0.3,
+    );
+  }
+  for (let i = 0; i < 14; i++) {
+    blob(
+      S * (0.15 + rng() * 0.7),
+      S * (0.35 + rng() * 0.3),
+      S * (0.05 + rng() * 0.07),
+      0.35,
+    );
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 // wobbly bright cells on black; two scrolling reads min()ed = caustics
 export function causticTexture(seed = 17) {
   const S = 256;

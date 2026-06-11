@@ -29,6 +29,7 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   900,
 );
+camera.layers.enable(1); // clouds
 
 const hf = makeHeightfield(SEED);
 const sky = createSky(scene);
@@ -118,7 +119,7 @@ renderer.setAnimationLoop(() => {
   water.update(dt);
   terrain.update(elapsed);
   veg.update(elapsed, player.pos);
-  sky.update(player.pos);
+  sky.update(player.pos, elapsed);
   audio.update(dt, hf.streamDist(player.pos.x, player.pos.z));
   if (statsHud) {
     renderer.info.reset();

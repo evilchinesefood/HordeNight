@@ -33,6 +33,14 @@ export function createPostFx(renderer, scene, camera, { ao = true } = {}) {
       samples: 12,
       distanceFallOff: 1,
     });
+    // clouds (layer 1) would stamp solid quads into the AO depth/normal
+    // pre-passes, which render with override materials
+    const gtaoRender = gtao.render.bind(gtao);
+    gtao.render = (...args) => {
+      camera.layers.disable(1);
+      gtaoRender(...args);
+      camera.layers.enable(1);
+    };
     composer.addPass(gtao);
   }
 
