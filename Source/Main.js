@@ -65,7 +65,7 @@ const player = new Player(
   input,
   hf,
   buildings.colliders,
-  [...veg.trunkColliders, ...clutter.circles],
+  [...veg.trunkColliders, ...clutter.circles, ...buildings.circles],
   spawn,
 );
 

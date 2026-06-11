@@ -440,6 +440,188 @@ export function groundTextureSet(seed = 7) {
   return { grass, dirt, rock, breakup: tex(bc, false) };
 }
 
+// --- weathered building surfaces (albedo + normal via makeLayer) ---
+
+export function plankTextureSet(seed = 31, base = "#8a6f4d", worn = null) {
+  return makeLayer(
+    seed,
+    256,
+    base,
+    (a, h, rng, S) => {
+      const rows = 7;
+      const rh = S / rows;
+      for (let r = 0; r < rows; r++) {
+        const y = r * rh;
+        a.globalAlpha = 0.1 + rng() * 0.14;
+        a.fillStyle = rng() < 0.5 ? "#3a2c1c" : "#c8a878";
+        a.fillRect(0, y, S, rh);
+        if (worn) {
+          for (let w = 0; w < 3; w++) {
+            a.globalAlpha = 0.12 + rng() * 0.18;
+            a.fillStyle = worn;
+            a.fillRect(rng() * S, y, 8 + rng() * 26, rh);
+          }
+        }
+        for (let g = 0; g < 9; g++) {
+          a.globalAlpha = 0.1 + rng() * 0.12;
+          a.strokeStyle = "#4a3826";
+          a.lineWidth = 1 + rng();
+          const gy = y + 2 + rng() * (rh - 5);
+          a.beginPath();
+          a.moveTo(0, gy);
+          a.bezierCurveTo(
+            S * 0.3,
+            gy + (rng() - 0.5) * 4,
+            S * 0.7,
+            gy + (rng() - 0.5) * 4,
+            S,
+            gy,
+          );
+          a.stroke();
+        }
+        a.globalAlpha = 0.55;
+        a.fillStyle = "#241a10";
+        a.fillRect(0, y + rh - 2, S, 2);
+        h.globalAlpha = 0.85;
+        h.fillStyle = "rgb(78,78,78)";
+        h.fillRect(0, y + rh - 2, S, 2);
+        h.globalAlpha = 0.25;
+        h.fillStyle = rng() < 0.5 ? "rgb(112,112,112)" : "rgb(146,146,146)";
+        h.fillRect(0, y, S, rh - 2);
+      }
+      for (let k = 0; k < 6; k++) {
+        const x = rng() * S,
+          y = rng() * S,
+          r = 2 + rng() * 3;
+        a.globalAlpha = 0.5;
+        a.fillStyle = "#33261a";
+        a.beginPath();
+        a.arc(x, y, r, 0, Math.PI * 2);
+        a.fill();
+        h.globalAlpha = 0.5;
+        h.fillStyle = "rgb(100,100,100)";
+        h.beginPath();
+        h.arc(x, y, r, 0, Math.PI * 2);
+        h.fill();
+      }
+      for (let w = 0; w < 7; w++) {
+        a.globalAlpha = 0.05 + rng() * 0.08;
+        a.fillStyle = "#9aa0a4";
+        a.fillRect(rng() * S, 0, 4 + rng() * 12, S);
+      }
+    },
+    2.4,
+  );
+}
+
+export function shingleTextureSet(seed = 33) {
+  return makeLayer(
+    seed,
+    256,
+    "#4e4036",
+    (a, h, rng, S) => {
+      const rows = 7;
+      const rh = S / rows;
+      const sw = 34;
+      for (let r = 0; r < rows; r++) {
+        const y = r * rh;
+        const off = (r % 2) * (sw / 2);
+        for (let x = -1; x < S / sw + 1; x++) {
+          const sx = x * sw + off;
+          a.globalAlpha = 0.12 + rng() * 0.16;
+          a.fillStyle = rng() < 0.5 ? "#2c241d" : "#6b5a4a";
+          a.fillRect(sx + 1, y, sw - 2, rh - 2);
+          a.globalAlpha = 0.5;
+          a.fillStyle = "#1d1712";
+          a.fillRect(sx, y, 2, rh);
+          h.globalAlpha = 0.3;
+          h.fillStyle = rng() < 0.5 ? "rgb(112,112,112)" : "rgb(150,150,150)";
+          h.fillRect(sx + 1, y, sw - 2, rh - 2);
+        }
+        a.globalAlpha = 0.6;
+        a.fillStyle = "#171310";
+        a.fillRect(0, y + rh - 3, S, 3);
+        h.globalAlpha = 0.9;
+        h.fillStyle = "rgb(70,70,70)";
+        h.fillRect(0, y + rh - 3, S, 3);
+      }
+    },
+    2.6,
+  );
+}
+
+export function stoneTextureSet(seed = 35) {
+  return makeLayer(
+    seed,
+    256,
+    "#7d7a72",
+    (a, h, rng, S) => {
+      const rows = 6;
+      const rh = S / rows;
+      for (let r = 0; r < rows; r++) {
+        const y = r * rh;
+        let x = -((r % 2) * 20) - rng() * 10;
+        while (x < S) {
+          const w = 36 + rng() * 34;
+          a.globalAlpha = 0.1 + rng() * 0.16;
+          a.fillStyle = rng() < 0.5 ? "#5d5a52" : "#94908a";
+          a.fillRect(x + 2, y + 2, w - 4, rh - 4);
+          h.globalAlpha = 0.3;
+          h.fillStyle = rng() < 0.5 ? "rgb(118,118,118)" : "rgb(150,150,150)";
+          h.fillRect(x + 2, y + 2, w - 4, rh - 4);
+          a.globalAlpha = 0.55;
+          a.fillStyle = "#3f3b35";
+          a.fillRect(x, y, 3, rh);
+          h.globalAlpha = 0.9;
+          h.fillStyle = "rgb(72,72,72)";
+          h.fillRect(x, y, 3, rh);
+          x += w;
+        }
+        a.globalAlpha = 0.55;
+        a.fillStyle = "#3f3b35";
+        a.fillRect(0, y, S, 3);
+        h.globalAlpha = 0.9;
+        h.fillStyle = "rgb(72,72,72)";
+        h.fillRect(0, y, S, 3);
+      }
+    },
+    2.8,
+  );
+}
+
+export function barrelTextureSet(seed = 37) {
+  return makeLayer(
+    seed,
+    256,
+    "#7a5c3c",
+    (a, h, rng, S) => {
+      const staves = 9;
+      const sw = S / staves;
+      for (let c = 0; c < staves; c++) {
+        const x = c * sw;
+        a.globalAlpha = 0.12 + rng() * 0.14;
+        a.fillStyle = rng() < 0.5 ? "#4a3522" : "#9c7c52";
+        a.fillRect(x, 0, sw - 2, S);
+        a.globalAlpha = 0.5;
+        a.fillStyle = "#2c1f12";
+        a.fillRect(x + sw - 2, 0, 2, S);
+        h.globalAlpha = 0.85;
+        h.fillStyle = "rgb(82,82,82)";
+        h.fillRect(x + sw - 2, 0, 2, S);
+      }
+      for (const by of [0.16, 0.8]) {
+        a.globalAlpha = 0.92;
+        a.fillStyle = "#26241f";
+        a.fillRect(0, S * by, S, S * 0.07);
+        h.globalAlpha = 0.9;
+        h.fillStyle = "rgb(185,185,185)";
+        h.fillRect(0, S * by, S, S * 0.07);
+      }
+    },
+    2.2,
+  );
+}
+
 // blobby tileable gray noise (foam masks etc)
 export function softNoiseTexture(seed = 21) {
   const S = 128;

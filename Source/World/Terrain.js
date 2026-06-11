@@ -53,6 +53,49 @@ export function createTerrain(hf, anisotropy = 4) {
 
   const tint = Fbm2(hf.seed + 55);
   const patches = Fbm2(hf.seed + 56);
+
+  // worn paths: connect each site to its nearest neighbor unless the
+  // segment would cross the stream
+  const paths = [];
+  const seen = new Set();
+  for (let i = 0; i < hf.sites.length; i++) {
+    let bj = -1;
+    let bd = 1e9;
+    for (let j = 0; j < hf.sites.length; j++) {
+      if (j === i) continue;
+      const d = Math.hypot(
+        hf.sites[i].x - hf.sites[j].x,
+        hf.sites[i].z - hf.sites[j].z,
+      );
+      if (d < bd) {
+        bd = d;
+        bj = j;
+      }
+    }
+    if (bj < 0 || bd > 110) continue;
+    const key = Math.min(i, bj) + ":" + Math.max(i, bj);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const a = hf.sites[i];
+    const b = hf.sites[bj];
+    let crosses = false;
+    for (let k = 1; k < 8; k++) {
+      const t = k / 8;
+      if (hf.streamDist(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t) < 12)
+        crosses = true;
+    }
+    if (!crosses) paths.push([a.x, a.z, b.x, b.z]);
+  }
+  const pathDist = (x, z) => {
+    let best = 1e9;
+    for (const [ax, az, bx, bz] of paths) {
+      const dx = bx - ax;
+      const dz = bz - az;
+      const t = clamp01(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz));
+      best = Math.min(best, Math.hypot(x - (ax + dx * t), z - (az + dz * t)));
+    }
+    return best;
+  };
   const normal = geo.attributes.normal;
   const colors = new Float32Array(pos.count * 3);
   const splat = new Float32Array(pos.count * 3); // grass, dirt, rock
@@ -71,6 +114,8 @@ export function createTerrain(hf, anisotropy = 4) {
       const d = Math.hypot(x - s.x, z - s.z);
       if (d < 9) dirt += clamp01((9 - d) / 5) * 0.7; // worn ground at buildings
     }
+    const pd = pathDist(x, z);
+    if (pd < 2.4) dirt += clamp01((2.4 - pd) / 1.5) * 0.85; // worn paths
     rock = Math.min(rock, 1.5);
     dirt = Math.min(dirt, 1.5);
     const grass = Math.max(0, 1 - rock - dirt);
