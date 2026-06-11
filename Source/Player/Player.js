@@ -56,7 +56,7 @@ export class Player {
     const sin = Math.sin(this.yaw);
     const cos = Math.cos(this.yaw);
     let wx = -sin * fwd + cos * side;
-    let wz = -cos * fwd + sin * side;
+    let wz = -cos * fwd - sin * side;
     const len = Math.hypot(wx, wz) || 1;
     wx = (wx / len) * speed;
     wz = (wz / len) * speed;

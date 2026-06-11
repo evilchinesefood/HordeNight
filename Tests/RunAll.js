@@ -9,6 +9,8 @@ import {
   standHeight,
 } from "../Source/Engine/Collision.js";
 import { buildSitePaths, pathDistance } from "../Source/Core/SitePaths.js";
+import { Player } from "../Source/Player/Player.js";
+import * as THREE from "three";
 
 let passed = 0;
 const test = (name, fn) => {
@@ -142,6 +144,30 @@ test("SitePaths: deterministic, deduped, rejects stream crossings", () => {
   assert.equal(buildSitePaths(sites, streamAt25).length, 0);
   assert.ok(Math.abs(pathDistance(p1, 25, 10) - 10) < 1e-9);
   assert.ok(Math.abs(pathDistance(p1, -20, 0) - 20) < 1e-9);
+});
+
+test("Player: WASD moves along camera axes at any yaw", () => {
+  const run = (yaw, key) => {
+    const input = { consumeLook: () => [0, 0], down: (c) => c === key };
+    const camera = { position: new THREE.Vector3(), rotation: { set() {} } };
+    const p = new Player(camera, input, { heightAt: () => 0 }, [], [], {
+      x: 0,
+      z: 0,
+      yaw,
+    });
+    for (let i = 0; i < 60; i++) p.update(1 / 60);
+    const len = Math.hypot(p.vel.x, p.vel.z);
+    return { x: p.vel.x / len, z: p.vel.z / len };
+  };
+  for (const yaw of [0, Math.PI / 2, Math.PI, -2.1]) {
+    const fwd = { x: -Math.sin(yaw), z: -Math.cos(yaw) };
+    const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };
+    const dot = (v, u) => v.x * u.x + v.z * u.z;
+    assert.ok(dot(run(yaw, "KeyW"), fwd) > 0.99, `W not forward at ${yaw}`);
+    assert.ok(dot(run(yaw, "KeyS"), fwd) < -0.99, `S not back at ${yaw}`);
+    assert.ok(dot(run(yaw, "KeyD"), right) > 0.99, `D not right at ${yaw}`);
+    assert.ok(dot(run(yaw, "KeyA"), right) < -0.99, `A not left at ${yaw}`);
+  }
 });
 
 console.log(`\n${passed} tests passed`);
