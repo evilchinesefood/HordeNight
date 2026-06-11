@@ -72,6 +72,52 @@
         background: linear-gradient(#c4503e, #8f2f22);
         transition: width 0.15s ease;
       }
+      #StaminaBar {
+        width: 240px;
+        height: 5px;
+        margin-top: 3px;
+        background: rgba(10, 12, 16, 0.55);
+        border: 1px solid rgba(232, 228, 216, 0.25);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      #StaminaFill {
+        height: 100%;
+        width: 100%;
+        background: #7e9c5a;
+        transition: width 0.1s linear;
+      }
+      #Crosshair {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 4px;
+        height: 4px;
+        margin: -2px 0 0 -2px;
+        border-radius: 50%;
+        background: rgba(232, 228, 216, 0.85);
+        box-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+        z-index: 5;
+        pointer-events: none;
+      }
+      #HitMarker {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -52%);
+        font: bold 22px monospace;
+        color: #fff;
+        text-shadow: 0 0 5px rgba(0, 0, 0, 0.9);
+        opacity: 0;
+        z-index: 6;
+        pointer-events: none;
+      }
+      #HitMarker.Show {
+        opacity: 1;
+      }
+      #HitMarker.Head {
+        color: #ffd34d;
+      }
       #DamageFlash {
         position: fixed;
         inset: 0;
@@ -122,7 +168,10 @@
     </div>
     <div id="Hud">
       <div id="HealthBar"><div id="HealthFill"></div></div>
+      <div id="StaminaBar"><div id="StaminaFill"></div></div>
     </div>
+    <div id="Crosshair"></div>
+    <div id="HitMarker">&#10005;</div>
     <div id="Clock">
       <span id="ClockTime">07:00</span><span id="ClockNight"></span>
     </div>

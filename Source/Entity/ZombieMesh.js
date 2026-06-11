@@ -3,6 +3,7 @@
 // shadowMap.autoUpdate=false intact - the blob fakes grounding (real
 // shadow-casting is a deferred option).
 import * as THREE from "three";
+import { DEATH_T } from "./Zombie.js";
 
 const LUNGE_T = 0.35; // matches Zombie.js lunge timer
 
@@ -77,19 +78,14 @@ export class ZombieMesh {
     }
   }
 
-  // greenish-gray skin + muted clothes, slight per-zombie variation
-  setColor(i, rng) {
-    const g = 0.5 + rng() * 0.18;
-    this._c.setRGB(g * 0.72, g, g * 0.68);
-    this.head.setColorAt(i, this._c);
-    this.armL.setColorAt(i, this._c);
-    this.armR.setColorAt(i, this._c);
-    const t = 0.2 + rng() * 0.16;
-    this._c.setRGB(t * (0.8 + rng() * 0.4), t * 0.9, t);
-    this.torso.setColorAt(i, this._c);
-    this.legL.setColorAt(i, this._c);
-    this.legR.setColorAt(i, this._c);
-    for (const m of this.parts) m.instanceColor.needsUpdate = true;
+  // colors come from z.skin/z.cloth each frame so the hit-flash can whiten
+  _tint(i, rgb, f, meshes) {
+    this._c.setRGB(
+      rgb[0] + (1 - rgb[0]) * f,
+      rgb[1] + (1 - rgb[1]) * f,
+      rgb[2] + (1 - rgb[2]) * f,
+    );
+    for (const m of meshes) m.setColorAt(i, this._c);
   }
 
   _local(px, py, pz, rx, rz = 0) {
@@ -110,11 +106,20 @@ export class ZombieMesh {
         this.blob.setMatrixAt(i, this._zero);
         continue;
       }
-      d.position.set(z.x, z.y, z.z);
-      d.rotation.set(0, z.yaw, 0);
+      // topple backward over the feet, then sink under the turf
+      const dieT = z.dying > 0 ? Math.min(z.dying / 0.55, 1) : 0;
+      const sink =
+        z.dying > 0 ? Math.max(0, (z.dying - 0.85) / (DEATH_T - 0.85)) : 0;
+      d.position.set(z.x, z.y - sink * 1.1, z.z);
+      d.rotation.set(dieT * 1.5, z.yaw, 0, "YXZ");
       d.scale.setScalar(z.scale);
       d.updateMatrix();
       this._root.copy(d.matrix);
+
+      const f = Math.min(1, z.flash * 9);
+      if (z.skin) this._tint(i, z.skin, f, [this.head, this.armL, this.armR]);
+      if (z.cloth)
+        this._tint(i, z.cloth, f, [this.torso, this.legL, this.legR]);
 
       const lunge = z.lunge / LUNGE_T;
       const swing = Math.sin(z.phase) * 0.5;
@@ -140,12 +145,15 @@ export class ZombieMesh {
       this.legR.setMatrixAt(i, this._local(0.12, 0.92, 0, -swing));
 
       d.position.set(z.x, z.y + 0.02, z.z);
-      d.rotation.set(0, 0, 0);
-      d.scale.setScalar(z.scale);
+      d.rotation.set(0, 0, 0, "YXZ");
+      d.scale.setScalar(z.scale * (1 - sink));
       d.updateMatrix();
       this.blob.setMatrixAt(i, d.matrix);
     }
-    for (const m of this.parts) m.instanceMatrix.needsUpdate = true;
+    for (const m of this.parts) {
+      m.instanceMatrix.needsUpdate = true;
+      m.instanceColor.needsUpdate = true;
+    }
     this.blob.instanceMatrix.needsUpdate = true;
   }
 }

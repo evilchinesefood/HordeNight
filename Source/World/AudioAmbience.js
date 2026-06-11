@@ -123,6 +123,24 @@ export class AudioAmbience {
     this.thud(0.5, 240, Math.min(0.55, 0.1 + speed * 0.045));
   }
 
+  // basic combat SFX: pitched reuses of the step burst (no new buffers)
+  shot(kind) {
+    if (!this.started) return;
+    if (kind === "shotgun") {
+      this.thud(2.2, 1700, 0.9);
+      this.thud(0.7, 480, 0.7); // boomy tail
+    } else if (kind === "rifle") this.thud(3.2, 2400, 0.5);
+    else this.thud(2.9, 2100, 0.62);
+  }
+
+  swing() {
+    if (this.started) this.thud(2.2, 900, 0.22);
+  }
+
+  thwack() {
+    if (this.started) this.thud(1.1, 650, 0.5);
+  }
+
   chirp() {
     const ctx = this.ctx;
     const t0 = ctx.currentTime;

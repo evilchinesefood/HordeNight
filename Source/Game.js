@@ -49,6 +49,12 @@ export class Game {
     const p = this.player;
     const run = locked || this.forceSim;
     if (locked && !p.dead) p.update(dt);
+    if (run && !p.dead) this.combat.update(dt, this.input);
+    this.viewModel.update(
+      dt,
+      locked ? Math.hypot(p.vel.x, p.vel.z) : 0,
+      p.grounded,
+    );
     let cyc = null;
     if (run) {
       cyc = this.dayNight.update(dt);
@@ -72,6 +78,7 @@ export class Game {
       this.hud.setHealth(p.health / p.maxHealth);
       this.lastHealth = p.health;
     }
+    this.hud.setStamina(p.stamina / p.maxStamina);
     this.hud.setClock(
       clockAt(this.dayNight.time),
       this.dayNight.phase,

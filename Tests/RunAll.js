@@ -39,7 +39,19 @@ import {
   ATTACK_RANGE,
   ATTACK_DMG,
   ATTACK_COOLDOWN,
+  DEATH_T,
 } from "../Source/Entity/Zombie.js";
+import { Zombies } from "../Source/Entity/Zombies.js";
+import {
+  rayZombie,
+  hitscan,
+  meleeTargets,
+  spreadDir,
+  HEAD_R,
+  BODY_R,
+} from "../Source/Combat/Combat.js";
+import { WEAPONS } from "../Source/Combat/WeaponDB.js";
+import { Inventory, HEAL_AMOUNT } from "../Source/Items/Inventory.js";
 import * as THREE from "three";
 
 let passed = 0;
@@ -549,6 +561,139 @@ test("Zombie: flee runs away from the player and never attacks", () => {
   assert.equal(hits, 0);
   assert.equal(z.state, "FLEE");
   assert.ok(z.fleeT > 4.9);
+});
+
+test("Combat: ray hits body capsule and head sphere at the right depths", () => {
+  const z = makeZombie(10, 0);
+  let h = rayZombie(0, 0.9, 0, 1, 0, 0, z); // chest height
+  assert.ok(h && !h.head);
+  assert.ok(Math.abs(h.t - (10 - BODY_R)) < 1e-9);
+  h = rayZombie(0, 1.5, 0, 1, 0, 0, z); // head height
+  assert.ok(h && h.head);
+  assert.ok(Math.abs(h.t - (10 - HEAD_R)) < 1e-9);
+  assert.equal(rayZombie(0, 2.1, 0, 1, 0, 0, z), null); // over the head
+  assert.equal(rayZombie(0, 0.9, 0, -1, 0, 0, z), null); // behind the ray
+  // scaled zombie scales its volumes
+  const big = makeZombie(10, 0);
+  big.scale = 1.2;
+  assert.ok(rayZombie(0, 1.5 * 1.2, 0, 1, 0, 0, big).head);
+});
+
+test("Combat: hitscan picks the nearest living target within range", () => {
+  const far = makeZombie(8, 0);
+  const near = makeZombie(5, 0);
+  const corpse = makeZombie(3, 0);
+  corpse.dying = 0.3;
+  const hit = hitscan(0, 0.9, 0, 1, 0, 0, [far, near, corpse], 80);
+  assert.equal(hit.z, near); // corpse is transparent to bullets
+  assert.equal(hitscan(0, 0.9, 0, 1, 0, 0, [far], 5), null); // out of range
+});
+
+test("Combat: damage math - depletion, kill threshold, knockback, no double kill", () => {
+  const ctx = { kills: 0 };
+  const z = makeZombie(0, 0);
+  const killed = Zombies.prototype.damage.call(ctx, z, 30, 1, 0, 2);
+  assert.equal(killed, false);
+  assert.equal(z.hp, 30);
+  assert.ok(z.flash > 0 && z.vx > 0); // hit-flash + knockback
+  assert.equal(Zombies.prototype.damage.call(ctx, z, 30), true);
+  assert.ok(z.dying > 0);
+  assert.equal(ctx.kills, 1);
+  // a corpse absorbs nothing and never double-counts
+  assert.equal(Zombies.prototype.damage.call(ctx, z, 99), false);
+  assert.equal(ctx.kills, 1);
+  // weapon sanity: point-blank shotgun one-shots, pistol headshot does not
+  assert.ok(WEAPONS.shotgun.pellets * WEAPONS.shotgun.damage >= 60);
+  assert.ok(WEAPONS.pistol.damage * WEAPONS.pistol.headMult < 60);
+  assert.equal(DEATH_T, 1.4);
+});
+
+test("Combat: spread stays inside the cone, melee arc is frontal-only", () => {
+  const rng = Mulberry(17);
+  for (let i = 0; i < 200; i++) {
+    const s = spreadDir(0, 0, -1, 0.05, rng);
+    assert.ok(Math.abs(Math.hypot(s.x, s.y, s.z) - 1) < 1e-9);
+    assert.ok(-s.z >= Math.cos(0.0501), `outside cone: ${-s.z}`);
+  }
+  assert.deepEqual(spreadDir(0, 0, -1, 0, rng), { x: 0, y: 0, z: -1 });
+  // melee: in front + in range only, sorted nearest first
+  const a = makeZombie(1.5, 0);
+  const b = makeZombie(1.0, 0.2);
+  const behind = makeZombie(-1.2, 0);
+  const farZ = makeZombie(5, 0);
+  const t = meleeTargets(0, 0, 1, 0, [a, b, behind, farZ], 2.3, 1.2);
+  assert.deepEqual(
+    t.map((x) => x.z),
+    [b, a],
+  );
+});
+
+test("Inventory: unlock flow, ammo math, reload, cycle, heal", () => {
+  const inv = new Inventory();
+  assert.equal(inv.selected, "bat");
+  assert.equal(inv.select(1), false); // pistol locked
+  inv.addItem("pistol");
+  assert.equal(inv.mag.pistol, WEAPONS.pistol.mag); // starter mag
+  assert.ok(inv.select(1));
+  for (let i = 0; i < WEAPONS.pistol.mag; i++)
+    assert.ok(inv.consumeRound("pistol"));
+  assert.equal(inv.consumeRound("pistol"), false); // dry
+  assert.equal(inv.canReload("pistol"), false); // no reserve yet
+  inv.addItem("9mm", 30);
+  assert.ok(inv.canReload("pistol"));
+  inv.finishReload("pistol");
+  assert.equal(inv.mag.pistol, 12);
+  assert.equal(inv.reserve["9mm"], 18);
+  // partial reserve tops up what it can
+  inv.reserve["9mm"] = 3;
+  inv.mag.pistol = 4;
+  inv.finishReload("pistol");
+  assert.equal(inv.mag.pistol, 7);
+  assert.equal(inv.reserve["9mm"], 0);
+  // cycle skips locked slots (shotgun/rifle locked): bat <-> pistol
+  inv.selected = "bat";
+  assert.ok(inv.cycle(1));
+  assert.equal(inv.selected, "pistol");
+  assert.ok(inv.cycle(1));
+  assert.equal(inv.selected, "bat");
+  // melee never consumes
+  assert.ok(inv.consumeRound("bat"));
+  // heals
+  assert.equal(inv.useHeal(), 0);
+  inv.addItem("bandage", 2);
+  assert.equal(inv.useHeal(), HEAL_AMOUNT);
+  assert.equal(inv.heals, 1);
+});
+
+test("Player: stamina drains on sprint, gates sprint at zero, regens after delay", () => {
+  const keys = new Set(["KeyW", "ShiftLeft"]);
+  const input = { consumeLook: () => [0, 0], down: (c) => keys.has(c) };
+  const camera = { position: new THREE.Vector3(), rotation: { set() {} } };
+  const p = new Player(camera, input, { heightAt: () => 0 }, [], [], {
+    x: 0,
+    z: 0,
+    yaw: 0,
+  });
+  for (let i = 0; i < 120; i++) p.update(1 / 60); // 2s sprint
+  assert.ok(p.stamina < 75 && p.stamina > 55, `drain off: ${p.stamina}`);
+  assert.ok(Math.hypot(p.vel.x, p.vel.z) > 8, "not sprinting");
+  // empty tank: winded hysteresis locks sprint until 15 stamina
+  p.stamina = 0.4;
+  for (let i = 0; i < 30; i++) p.update(1 / 60);
+  assert.ok(p.winded, "not winded at empty");
+  assert.ok(Math.hypot(p.vel.x, p.vel.z) < 6, "sprint not gated when winded");
+  keys.clear(); // stop: regen kicks in after the delay
+  for (let i = 0; i < 90; i++) p.update(1 / 60);
+  assert.ok(p.stamina > 2, "no regen");
+  // melee spend
+  assert.equal(p.useStamina(1e6), false);
+  const before = p.stamina;
+  assert.ok(p.useStamina(1));
+  assert.ok(p.stamina < before);
+  // heal clamps
+  p.health = 90;
+  p.heal(35);
+  assert.equal(p.health, 100);
 });
 
 test("Player: takeDamage clamps at zero and sets dead exactly once", () => {

@@ -38,6 +38,10 @@ export class Player {
     this.maxHealth = 100;
     this.health = this.maxHealth;
     this.dead = false;
+    this.maxStamina = 100;
+    this.stamina = this.maxStamina;
+    this.staminaWait = 0;
+    this.winded = false; // hysteresis: empty tank locks sprint until 15
     this.update(0);
   }
 
@@ -45,6 +49,19 @@ export class Player {
     if (this.dead) return;
     this.health = Math.max(0, this.health - d);
     if (this.health === 0) this.dead = true;
+  }
+
+  heal(n) {
+    if (this.dead) return;
+    this.health = Math.min(this.maxHealth, this.health + n);
+  }
+
+  // melee/actions spend from the sprint pool; false = too winded
+  useStamina(n) {
+    if (this.stamina < n) return false;
+    this.stamina -= n;
+    this.staminaWait = 0.8;
+    return true;
   }
 
   update(dt) {
@@ -60,8 +77,19 @@ export class Player {
       (this.input.down("KeyW") ? 1 : 0) - (this.input.down("KeyS") ? 1 : 0);
     const side =
       (this.input.down("KeyD") ? 1 : 0) - (this.input.down("KeyA") ? 1 : 0);
-    const sprint =
+    const wantSprint =
       this.input.down("ShiftLeft") || this.input.down("ShiftRight");
+    if (this.stamina <= 0.5) this.winded = true;
+    else if (this.stamina > 15) this.winded = false;
+    const sprint = wantSprint && (fwd !== 0 || side !== 0) && !this.winded;
+    if (sprint) {
+      this.stamina = Math.max(0, this.stamina - 16 * dt);
+      this.staminaWait = 0.8;
+    } else {
+      this.staminaWait -= dt;
+      if (this.staminaWait <= 0)
+        this.stamina = Math.min(this.maxStamina, this.stamina + 12 * dt);
+    }
     const speed = sprint ? SPRINT : WALK;
 
     const sin = Math.sin(this.yaw);

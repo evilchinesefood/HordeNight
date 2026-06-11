@@ -5,7 +5,7 @@
 import { makeGrid } from "../Engine/SpatialGrid.js";
 import { ZombieMesh } from "./ZombieMesh.js";
 import { tick, pickSpawnPoint, spawnParams } from "./Spawner.js";
-import { makeZombie, step, ATTACK_DMG, Z_RADIUS } from "./Zombie.js";
+import { makeZombie, step, ATTACK_DMG, Z_RADIUS, DEATH_T } from "./Zombie.js";
 import { isClearAt } from "../Core/Placement.js";
 
 const MAX_POOL = 48;
@@ -20,6 +20,7 @@ export class Zombies {
     this.heightAt = heightAt;
     this.rng = rng;
     this.accum = 0;
+    this.kills = 0;
     this.pool = Array.from({ length: MAX_POOL }, () => {
       const z = makeZombie(0, 0);
       z.active = false;
@@ -70,8 +71,26 @@ export class Zombies {
     z.phase = this.rng() * Math.PI * 2;
     z.y = this.heightAt(p.x, p.z);
     z.yaw = Math.atan2(-(player.pos.x - p.x), -(player.pos.z - p.z));
+    // greenish-gray skin + muted clothes; the rig multiplies these in
+    const g = 0.5 + this.rng() * 0.18;
+    z.skin = [g * 0.72, g, g * 0.68];
+    const t = 0.2 + this.rng() * 0.16;
+    z.cloth = [t * (0.8 + this.rng() * 0.4), t * 0.9, t];
     this.pool[slot] = z;
-    this.mesh.setColor(slot, this.rng);
+    return true;
+  }
+
+  // combat entry point; returns true when the hit was the kill
+  damage(z, dmg, dirx = 0, dirz = 0, knock = 0) {
+    if (!z.active || z.dying > 0) return false;
+    z.hp -= dmg;
+    z.flash = 0.12;
+    z.vx += dirx * knock;
+    z.vz += dirz * knock;
+    if (z.hp > 0) return false;
+    z.dying = 1e-4; // topple starts this frame
+    z.state = "DEAD";
+    this.kills++;
     return true;
   }
 
@@ -112,6 +131,12 @@ export class Zombies {
 
     this.active = this.pool.filter((z) => z.active);
     for (const z of this.active) {
+      z.flash = Math.max(0, z.flash - dt);
+      if (z.dying > 0) {
+        z.dying += dt; // corpse: topple clock only, no steering
+        if (z.dying >= DEATH_T) z.active = false;
+        continue;
+      }
       z.speed = (z.baseSpeed ?? z.speed) * params.speedMul;
       const nearby = this.grid.queryRadius(z.x, z.z, QUERY_R);
       step(z, px, pz, nearby, this.active, dt);

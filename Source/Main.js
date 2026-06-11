@@ -17,6 +17,9 @@ import { Mulberry } from "./Core/Rng.js";
 import { Zombies } from "./Entity/Zombies.js";
 import { Game } from "./Game.js";
 import { Hud } from "./Hud.js";
+import { Inventory } from "./Items/Inventory.js";
+import { Combat } from "./Combat/Combat.js";
+import { ViewModel } from "./Combat/ViewModel.js";
 
 const SEED = 7;
 const QS = new URLSearchParams(location.search);
@@ -151,8 +154,42 @@ const zombies = new Zombies({
   rng: Mulberry(SEED * 7919 + 1), // own stream: world draws stay untouched
 });
 scene.add(zombies.group);
+scene.add(camera); // the first-person viewmodel hangs off the camera
+const inventory = new Inventory();
+// dev arsenal until Stage C loot lands: every gun + deep reserves
+for (const w of ["pistol", "shotgun", "rifle"]) inventory.addItem(w);
+inventory.addItem("9mm", 240);
+inventory.addItem("shell", 60);
+inventory.addItem("5.56", 270);
+inventory.addItem("bandage", 3);
+const viewModel = new ViewModel(camera);
+const combat = new Combat({
+  camera,
+  player,
+  zombies,
+  inventory,
+  viewModel,
+  hud,
+  audio,
+  rng: Mulberry(SEED * 131 + 7),
+});
 const game = new Game(
-  { player, zombies, weather, water, terrain, veg, sky, audio, hf, hud },
+  {
+    player,
+    zombies,
+    weather,
+    water,
+    terrain,
+    veg,
+    sky,
+    audio,
+    hf,
+    hud,
+    input,
+    inventory,
+    combat,
+    viewModel,
+  },
   () => {
     hud.flashDeath();
     document.exitPointerLock?.();
@@ -332,6 +369,8 @@ window.HN = {
   zombies,
   game,
   hud,
+  combat,
+  inventory,
 };
 const tp = QS.get("tp");
 if (tp) {

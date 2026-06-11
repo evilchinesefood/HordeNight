@@ -32,7 +32,11 @@ export const makeZombie = (x, z, cd = 0.5, speed = 2.5) => ({
   active: true,
   flee: false, // dawn survivors run out and despawn
   fleeT: 0,
+  flash: 0, // hit-flash timer (whitens the rig)
+  dying: 0, // >0 = topple animation clock; despawns at DEATH_T
 });
+
+export const DEATH_T = 1.4;
 
 export function step(z, px, pz, nearby, neighbors, dt) {
   z.attacked = false;
