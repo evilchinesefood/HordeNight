@@ -9,9 +9,11 @@ const RAIN_LAYER = 2; // custom vertex shader -> excluded from GTAO pre-passes
 // drizzle cycle + camera-following rain streaks; while raining the fog
 // closes in, the sun dims and grass gusts pick up (shared-wind model)
 export class Weather {
-  constructor(scene, sun, fog, seed = 7) {
+  constructor(scene, sun, fog, renderer, seed = 7) {
     this.sun = sun;
     this.fog = fog;
+    this.renderer = renderer;
+    this.baseExposure = renderer.toneMappingExposure;
     this.baseSun = sun.intensity;
     this.baseNear = fog.near;
     this.baseFar = fog.far;
@@ -89,7 +91,10 @@ export class Weather {
       this.uniforms.uMix.value = w;
     }
     this.gust = 1 + w * 1.4;
-    this.sun.intensity = this.baseSun * (1 - 0.35 * w);
+    this.sun.intensity = this.baseSun * (1 - 0.5 * w);
+    // overcast: turbid gray dome + global exposure drop
+    if (this.setOvercast) this.setOvercast(w);
+    this.renderer.toneMappingExposure = this.baseExposure * (1 - 0.42 * w);
     this.fog.near = this.baseNear * (1 - 0.4 * w);
     this.fog.far = this.baseFar * (1 - 0.42 * w);
     this.fog.color.copy(this.baseCol).lerp(this.wetCol, w * 0.8);

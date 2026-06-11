@@ -93,6 +93,7 @@ function createClouds(scene) {
         fog: false,
       }),
     );
+    mat.userData.base = mat.color.clone(); // night preset dims from this
     const mesh = new THREE.InstancedMesh(geo, mat, count);
     mesh.layers.set(CLOUD_LAYER);
     mesh.frustumCulled = false;
@@ -134,6 +135,12 @@ function createClouds(scene) {
     }),
   );
   const m = new THREE.Matrix4();
+  const setTone = (mult) => {
+    for (const { mesh } of layers)
+      mesh.material.color
+        .copy(mesh.material.userData.base)
+        .multiplyScalar(mult);
+  };
   const update = (t) => {
     for (const { mesh, items } of layers) {
       items.forEach((c, i) => {
@@ -146,17 +153,17 @@ function createClouds(scene) {
     }
   };
   update(0);
-  return update;
+  return { update, setTone };
 }
 
 export function createSky(scene) {
   const sky = new Sky();
   sky.scale.setScalar(2000);
   const u = sky.material.uniforms;
-  u.turbidity.value = 7;
+  u.turbidity.value = 4;
   u.rayleigh.value = 1.8;
-  u.mieCoefficient.value = 0.004;
-  u.mieDirectionalG.value = 0.8;
+  u.mieCoefficient.value = 0.0015;
+  u.mieDirectionalG.value = 0.93; // tight forward lobe: small natural disk
   u.sunPosition.value.copy(SUN_DIR);
   scene.add(sky);
 
@@ -178,10 +185,33 @@ export function createSky(scene) {
   scene.add(sun, sun.target);
 
   // cool fill so shadows read blue against the warm sun
-  scene.add(new THREE.HemisphereLight(0xbcd2ee, 0x8a7a58, 1.05));
-  scene.add(new THREE.AmbientLight(0x4e5c78, 0.8));
+  const hemi = new THREE.HemisphereLight(0xbcd2ee, 0x8a7a58, 1.05);
+  const amb = new THREE.AmbientLight(0x4e5c78, 0.8);
+  scene.add(hemi, amb);
 
-  const updateClouds = createClouds(scene);
+  // dev/night preset: sun dips below the horizon, moonlight takes over
+  const NIGHT_DIR = new THREE.Vector3().setFromSphericalCoords(
+    1,
+    THREE.MathUtils.degToRad(98),
+    theta,
+  );
+  // overcast blend for weather: hazy turbid dome grays the sun glow
+  const setOvercast = (w) => {
+    u.turbidity.value = 4 + w * 16;
+    u.mieCoefficient.value = 0.0015 + w * 0.004;
+    u.rayleigh.value = 1.8 - w * 1.1;
+  };
+  const setNight = (on) => {
+    u.sunPosition.value.copy(on ? NIGHT_DIR : SUN_DIR);
+    sun.intensity = on ? 0.4 : 3.0;
+    sun.color.set(on ? 0x91a8d0 : 0xffd9a6);
+    hemi.intensity = on ? 0.2 : 1.05;
+    amb.intensity = on ? 0.28 : 0.8;
+    clouds.setTone(on ? 0.12 : 1); // unlit billboards: dim them by hand
+    return sun.intensity; // new weather baseline
+  };
+
+  const clouds = createClouds(scene);
 
   const texel = (SHADOW_SPAN * 2) / SHADOW_RES;
   let lastTx = null;
@@ -201,10 +231,10 @@ export function createSky(scene) {
         tz + SUN_DIR.z * 150,
       );
     }
-    updateClouds(t);
+    clouds.update(t);
     return moved; // caller gates renderer.shadowMap.needsUpdate on this
   };
   update(new THREE.Vector3());
 
-  return { sun, sunDir: SUN_DIR, update };
+  return { sun, sunDir: SUN_DIR, update, setNight, setOvercast };
 }

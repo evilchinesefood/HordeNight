@@ -8,7 +8,6 @@ import {
   softNoiseTexture,
   leafClusterTexture,
   impostorCardTexture,
-  shrubTextureSet,
 } from "../Engine/Textures.js";
 
 const TREE_TRIES = 9000;
@@ -476,17 +475,30 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
   grass.layers.set(2); // AO-excluded: override materials drop the wrap shader
   group.add(grass);
 
-  // --- shrubs ---
-  const shrubGeo = new THREE.IcosahedronGeometry(0.55, 1)
-    .scale(1.2, 0.75, 1.2)
-    .translate(0, 0.32, 0);
-  const shrubTex = shrubTextureSet(hf.seed + 63);
-  const shrubMat = new THREE.MeshStandardMaterial({
-    map: shrubTex.map,
-    normalMap: shrubTex.nor,
+  // --- bushes: crossed leaf-cluster cards, mini tree canopies ---
+  const bushCard = new THREE.PlaneGeometry(1.7, 1.2).translate(0, 0.5, 0);
+  const bushGeo = mergeGeometries([
+    bushCard,
+    bushCard.clone().rotateY(Math.PI / 3),
+    bushCard.clone().rotateY((Math.PI * 2) / 3),
+  ]);
+  {
+    const nor = bushGeo.attributes.normal;
+    for (let i = 0; i < nor.count; i++) nor.setXYZ(i, 0, 1, 0);
+  }
+  const bushMat = new THREE.MeshStandardMaterial({
+    map: leafClusterTexture(hf.seed + 63, false),
+    alphaTest: 0.35,
+    side: THREE.DoubleSide,
     roughness: 1,
   });
-  const shrubs = new THREE.InstancedMesh(shrubGeo, shrubMat, SHRUB_COUNT);
+  leafSway(bushMat, 1.2, hf.seed + 63);
+  const bushes = new THREE.InstancedMesh(bushGeo, bushMat, SHRUB_COUNT);
+  bushes.customDepthMaterial = new THREE.MeshDepthMaterial({
+    depthPacking: THREE.RGBADepthPacking,
+    map: bushMat.map,
+    alphaTest: 0.35,
+  });
   let sp = 0;
   for (let i = 0; i < SHRUB_COUNT * 5 && sp < SHRUB_COUNT; i++) {
     const x = (rng() * 2 - 1) * (HALF - 10);
@@ -494,21 +506,22 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
     const y = hf.heightAt(x, z);
     if (y < WATER_Y + 0.4) continue;
     if (!clearOfSites(x, z, 9)) continue;
-    const s = 0.6 + rng() * 1.1;
+    const s = 0.55 + rng() * 1.0;
     m.makeRotationY(rng() * Math.PI * 2);
-    m.scale(v.set(s, s * (0.9 + rng() * 0.25), s));
-    m.setPosition(x, y, z);
-    shrubs.setMatrixAt(sp, m);
-    shrubs.setColorAt(
+    m.scale(v.set(s, s * (0.8 + rng() * 0.35), s));
+    m.setPosition(x, y - 0.06, z);
+    bushes.setMatrixAt(sp, m);
+    bushes.setColorAt(
       sp,
-      col.setHSL(0.25 + rng() * 0.04, 0.42, 0.45 + rng() * 0.15),
+      col.setRGB(0.85 + rng() * 0.35, 0.9 + rng() * 0.3, 0.8 + rng() * 0.25),
     );
     sp++;
   }
-  shrubs.count = sp;
-  shrubs.castShadow = true;
-  shrubs.receiveShadow = true;
-  group.add(shrubs);
+  bushes.count = sp;
+  bushes.castShadow = true;
+  bushes.receiveShadow = true;
+  bushes.layers.set(2); // alpha cards: AO-excluded, shadow cam covers layer 2
+  group.add(bushes);
 
   // LOD records grouped by unique chunk center: one distance test per chunk,
   // +/-4m hysteresis, and skipped entirely until the player moves 2m

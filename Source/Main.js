@@ -80,7 +80,45 @@ const postFx = createPostFx(renderer, scene, camera, {
 });
 const input = new Input(renderer.domElement);
 const audio = new AudioAmbience();
-const weather = new Weather(scene, sky.sun, scene.fog);
+const weather = new Weather(scene, sky.sun, scene.fog, renderer);
+weather.setOvercast = sky.setOvercast;
+
+// dev menu: force day/night/rain for testing (visible while unpaused)
+const devMenu = document.createElement("div");
+devMenu.style.cssText =
+  "position:fixed;bottom:10px;left:10px;z-index:1000;display:flex;gap:6px;" +
+  "font:12px monospace";
+const devBtn = (label, fn) => {
+  const b = document.createElement("button");
+  b.textContent = label;
+  b.style.cssText =
+    "background:rgba(0,0,0,.7);color:#cde;border:1px solid #567;" +
+    "padding:5px 10px;cursor:pointer";
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    fn(b);
+  });
+  devMenu.appendChild(b);
+  return b;
+};
+devBtn("Day", () => {
+  weather.baseSun = sky.setNight(false);
+  renderer.shadowMap.needsUpdate = true;
+});
+devBtn("Night", () => {
+  weather.baseSun = sky.setNight(true);
+  renderer.shadowMap.needsUpdate = true;
+});
+devBtn("Rain: auto", (b) => {
+  weather.force = weather.force === null ? 1 : weather.force === 1 ? 0 : null;
+  b.textContent =
+    weather.force === null
+      ? "Rain: auto"
+      : weather.force
+        ? "Rain: on"
+        : "Rain: off";
+});
+document.body.appendChild(devMenu);
 
 // spawn near the first cabin, facing the world center, on validated clear ground
 const home = hf.sites[0] ?? { x: 0, z: 0 };
@@ -174,6 +212,7 @@ if (location.search.includes("debug")) {
 }
 input.onLockChange = (locked) => {
   overlay.classList.toggle("Hidden", locked);
+  devMenu.style.display = locked ? "none" : "flex";
   if (locked) everLocked = true;
   else if (everLocked)
     setHint("Paused - click to resume \u00b7 Esc releases the mouse");
@@ -211,11 +250,12 @@ renderer.setAnimationLoop(() => {
 });
 
 // debug handle for automated smoke tests
-window.HN = { player, hf, scene, renderer, camera, veg, weather };
+window.HN = { player, hf, scene, renderer, camera, veg, weather, sky };
 const tp = new URLSearchParams(location.search).get("tp");
 if (tp) {
-  const [x, z, yaw] = tp.split(",").map(Number);
+  const [x, z, yaw, pitch] = tp.split(",").map(Number);
   player.pos.set(x, hf.heightAt(x, z), z);
   player.yaw = yaw || 0;
+  player.pitch = pitch || 0;
   player.update(0);
 }

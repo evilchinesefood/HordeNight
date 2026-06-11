@@ -3,7 +3,7 @@ import { HALF, WATER_Y } from "../Core/Heightfield.js";
 import { Mulberry } from "../Core/Rng.js";
 import { rockSurfaceSet } from "../Engine/Textures.js";
 
-const ROCK_COUNT = 320;
+const ROCK_COUNT = 680;
 const LOG_COUNT = 16;
 
 // position-hashed radial jitter keeps the non-indexed icosahedron crack-free
@@ -59,7 +59,7 @@ export function createClutter(hf) {
     const y = hf.heightAt(x, z);
     if (y < WATER_Y - 0.4) continue;
     const steep = slopeAt(x, z) > 1.6;
-    if (!steep && rng() > 0.3) continue;
+    if (!steep && rng() > 0.45) continue;
     if (hf.sites.some((s) => (s.x - x) ** 2 + (s.z - z) ** 2 < 7 ** 2))
       continue;
     const s = 0.25 + rng() * rng() * 1.5;
