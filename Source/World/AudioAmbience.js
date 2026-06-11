@@ -40,7 +40,16 @@ export class AudioAmbience {
     this.ctx = ctx;
     this.master = ctx.createGain();
     this.master.gain.value = 0.55;
-    this.master.connect(ctx.destination);
+    // compressor keeps stacked gunshots from clipping the mix
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -14;
+    comp.knee.value = 18;
+    comp.ratio.value = 8;
+    comp.attack.value = 0.002;
+    comp.release.value = 0.12;
+    this.master.connect(comp).connect(ctx.destination);
+    // flat white loop enveloped at play time (gunshot crack/tail layers)
+    this.shotBuf = noiseBuffer(ctx, 0.5, false);
 
     // wind: slow-breathing filtered brown noise
     const wind = ctx.createBufferSource();
@@ -123,14 +132,87 @@ export class AudioAmbience {
     this.thud(0.5, 240, Math.min(0.55, 0.1 + speed * 0.045));
   }
 
-  // basic combat SFX: pitched reuses of the step burst (no new buffers)
+  // enveloped noise layer for gunshots/clicks (offset+loop for variety)
+  _burst({ rate = 1, type = "lowpass", freq, vol, dur, at = 0 }) {
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime + at;
+    const src = ctx.createBufferSource();
+    src.buffer = this.shotBuf;
+    src.loop = true;
+    src.playbackRate.value = rate;
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    src.connect(f).connect(g).connect(this.master);
+    src.start(t0, Math.random() * 0.3);
+    src.stop(t0 + dur + 0.05);
+  }
+
+  // layered gunshot: highpassed attack crack + pitch-dropping sine boom +
+  // lowpassed air tail; per-weapon voicing, slight random detune
   shot(kind) {
     if (!this.started) return;
-    if (kind === "shotgun") {
-      this.thud(2.2, 1700, 0.9);
-      this.thud(0.7, 480, 0.7); // boomy tail
-    } else if (kind === "rifle") this.thud(3.2, 2400, 0.5);
-    else this.thud(2.9, 2100, 0.62);
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+    const det = 0.9 + Math.random() * 0.2;
+    // prettier-ignore
+    const P = {
+      pistol:  { hp: 1700, cv: 0.55, ct: 0.04, f0: 160, f1: 58, bt: 0.09, bv: 0.5,  tv: 0.18, tt: 0.22, lp: 1400 },
+      shotgun: { hp: 900,  cv: 0.6,  ct: 0.05, f0: 115, f1: 38, bt: 0.17, bv: 0.9,  tv: 0.32, tt: 0.42, lp: 850 },
+      rifle:   { hp: 2100, cv: 0.5,  ct: 0.03, f0: 175, f1: 70, bt: 0.07, bv: 0.42, tv: 0.2,  tt: 0.26, lp: 1600 },
+    }[kind] ?? { hp: 1700, cv: 0.55, ct: 0.04, f0: 160, f1: 58, bt: 0.09, bv: 0.5, tv: 0.18, tt: 0.22, lp: 1400 };
+    this._burst({
+      rate: det * 1.6,
+      type: "highpass",
+      freq: P.hp,
+      vol: P.cv,
+      dur: P.ct,
+    });
+    const osc = ctx.createOscillator();
+    osc.frequency.setValueAtTime(P.f0 * det, t0);
+    osc.frequency.exponentialRampToValueAtTime(P.f1, t0 + P.bt);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(P.bv, t0);
+    og.gain.exponentialRampToValueAtTime(0.001, t0 + P.bt * 1.6);
+    osc.connect(og).connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + P.bt * 1.6 + 0.05);
+    this._burst({ rate: det, freq: P.lp, vol: P.tv, dur: P.tt });
+  }
+
+  // dry-fire / equipment tick
+  click() {
+    if (this.started)
+      this._burst({
+        rate: 2.5,
+        type: "highpass",
+        freq: 2400,
+        vol: 0.14,
+        dur: 0.03,
+      });
+  }
+
+  // two quick mechanical ticks bracket a reload
+  reloadClick() {
+    if (!this.started) return;
+    this._burst({
+      rate: 1.8,
+      type: "highpass",
+      freq: 1500,
+      vol: 0.18,
+      dur: 0.04,
+    });
+    this._burst({
+      rate: 2.2,
+      type: "highpass",
+      freq: 1900,
+      vol: 0.15,
+      dur: 0.035,
+      at: 0.08,
+    });
   }
 
   swing() {

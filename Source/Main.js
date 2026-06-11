@@ -22,6 +22,7 @@ import { LootContainers } from "./Items/LootContainers.js";
 import { Combat } from "./Combat/Combat.js";
 import { ViewModel } from "./Combat/ViewModel.js";
 import { Particles } from "./Engine/Particles.js";
+import { createLanterns } from "./World/Lanterns.js";
 
 const SEED = 7;
 const QS = new URLSearchParams(location.search);
@@ -106,6 +107,10 @@ const loot = new LootContainers({
   seed: SEED,
 });
 scene.add(loot.group);
+// hanging lanterns in every roofed interior; NOT matrix-frozen - the two
+// shared interior lights roam to the nearest lanterns each frame
+const lanterns = createLanterns(buildings.structures);
+scene.add(lanterns.group);
 // crates/cabinets block movement alongside the building walls
 const colliderBoxes = buildings.colliders.concat(loot.boxes());
 
@@ -199,6 +204,7 @@ const game = new Game(
     viewModel,
     loot,
     particles,
+    lanterns,
   },
   () => {
     hud.flashDeath();
@@ -388,6 +394,7 @@ window.HN = {
   loot,
   input,
   particles,
+  lanterns,
 };
 const tp = QS.get("tp");
 if (tp) {

@@ -22,6 +22,7 @@ export class Player {
     this.boxes = boxes;
     this.trunks = trunks;
 
+    this.baseFov = camera.fov; // ADS zoom scales look speed from this
     this.pos = new THREE.Vector3(
       spawn.x,
       hf.heightAt(spawn.x, spawn.z),
@@ -66,9 +67,13 @@ export class Player {
 
   update(dt) {
     const [lx, ly] = this.input.consumeLook();
-    this.yaw -= lx * LOOK_SPEED;
+    // zoomed-in look distance per pixel shrinks with FOV (ADS feel)
+    const look =
+      LOOK_SPEED *
+      (this.camera.fov && this.baseFov ? this.camera.fov / this.baseFov : 1);
+    this.yaw -= lx * look;
     this.pitch = THREE.MathUtils.clamp(
-      this.pitch - ly * LOOK_SPEED,
+      this.pitch - ly * look,
       -Math.PI / 2 + 0.01,
       Math.PI / 2 - 0.01,
     );

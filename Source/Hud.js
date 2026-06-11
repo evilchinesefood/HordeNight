@@ -99,6 +99,13 @@ export class Hud {
     this.invPanel.innerHTML = `<h3>Carried</h3><ul>${rows.join("")}</ul>`;
   }
 
+  setAim(on) {
+    if (on === this.aimOn) return;
+    this.aimOn = on;
+    const el = document.getElementById("Crosshair");
+    if (el) el.style.display = on ? "none" : ""; // sights replace the dot
+  }
+
   setStamina(frac) {
     if (this.stamFill)
       this.stamFill.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;

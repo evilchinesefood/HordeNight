@@ -89,6 +89,17 @@ export class ViewModel {
     this.flashLight = new THREE.PointLight(0xffc97a, 0, 9, 1.6);
     this.group.add(this.flashLight);
 
+    // flashlight: lives on the CAMERA (not the swaying weapon group) and
+    // stays in the scene at intensity 0 so toggling never changes the
+    // light count (that would recompile every lit shader)
+    this.torch = new THREE.SpotLight(0xfff2d0, 0, 32, 0.48, 0.45, 1.2);
+    this.torch.position.set(0.07, -0.05, 0);
+    this.torchTarget = new THREE.Object3D();
+    this.torchTarget.position.set(0, -0.5, -12);
+    this.torch.target = this.torchTarget;
+    camera.add(this.torch, this.torchTarget);
+    this.torchOn = false;
+
     this.current = "bat";
     this.models.bat.visible = true;
     this.recoil = 0;
@@ -100,7 +111,15 @@ export class ViewModel {
     this.bob = 0;
     this.slideT = 0;
     this.pumpT = 0;
+    this.aimT = 0; // driven by Combat each frame
     this._mw = new THREE.Vector3();
+    this._pose = new THREE.Vector3();
+  }
+
+  toggleTorch() {
+    this.torchOn = !this.torchOn;
+    this.torch.intensity = this.torchOn ? 26 : 0;
+    return this.torchOn;
   }
 
   // assemble: static geos merged per material + optional mover mesh
@@ -164,6 +183,8 @@ export class ViewModel {
       new THREE.Vector3(0, 0.034, -0.165),
     );
     g.position.set(-0.01, 0.05, 0.12); // pistols are small: hold closer/higher
+    // group position that lines the sights up with screen center
+    g.userData.aimPos = new THREE.Vector3(0.01, -0.116, -0.32);
     return g;
   }
 
@@ -187,11 +208,13 @@ export class ViewModel {
     box(pump, 0.046, 0.042, 0.15, 0, -0.004, -0.36);
     for (const z of [-0.315, -0.36, -0.405])
       box(pump, 0.052, 0.048, 0.014, 0, -0.004, z); // grip ribs
-    return this._model(
+    const g = this._model(
       { metal, wood, dark, brass },
       { geos: pump, mat: "wood" },
       new THREE.Vector3(0, 0.04, -0.585),
     );
+    g.userData.aimPos = new THREE.Vector3(0, -0.064, -0.36);
+    return g;
   }
 
   _rifle() {
@@ -211,11 +234,13 @@ export class ViewModel {
     box(metal, 0.05, 0.014, 0.045, 0, 0.052, 0.07); // charging handle
     box(metal, 0.012, 0.02, 0.12, 0.034, 0.01, -0.24); // side rail
     box(wood, 0.046, 0.07, 0.2, 0, -0.012, 0.18, 0.06); // stock
-    return this._model(
+    const g = this._model(
       { dark, metal, wood },
       null,
       new THREE.Vector3(0, 0.014, -0.57),
     );
+    g.userData.aimPos = new THREE.Vector3(0, -0.06, -0.34);
+    return g;
   }
 
   // world-space muzzle tip for particles/casings (bat: in front of hands)
@@ -298,7 +323,11 @@ export class ViewModel {
     }
 
     const g = this.group;
-    const bobA = Math.min(moveSpeed / 5.2, 1.4) * 0.012;
+    // aim blend: slide to the per-weapon sight-aligned pose, steady the bob
+    const at = this.models[this.current].userData.aimPos ? this.aimT : 0;
+    this._pose.copy(BASE_POS);
+    if (at > 0) this._pose.lerp(this.models[this.current].userData.aimPos, at);
+    const bobA = Math.min(moveSpeed / 5.2, 1.4) * 0.012 * (1 - 0.7 * at);
     // swap dip: 1 at the bottom of the lower/raise vee
     const swapDip = this.swapT > 0 ? 1 - Math.abs(this.swapT - 0.15) / 0.15 : 0;
     // reload: dip + roll while the timer runs
@@ -307,12 +336,12 @@ export class ViewModel {
         ? Math.sin((1 - this.reloadT / this.reloadDur) * Math.PI)
         : 0;
     g.position.set(
-      BASE_POS.x + Math.sin(this.bob) * bobA,
-      BASE_POS.y +
+      this._pose.x + Math.sin(this.bob) * bobA,
+      this._pose.y +
         Math.abs(Math.cos(this.bob)) * bobA * 0.8 -
         swapDip * 0.3 -
         rl * 0.12,
-      BASE_POS.z + this.recoil * 0.09,
+      this._pose.z + this.recoil * 0.09 * (1 - 0.4 * at),
     );
     // melee swing: wind back then arc across
     let swingRotX = 0;
@@ -324,7 +353,7 @@ export class ViewModel {
       swingRotY = (st - 0.5) * 1.2;
     }
     g.rotation.set(
-      this.recoil * 0.35 + swingRotX - rl * 0.7,
+      this.recoil * 0.35 * (1 - 0.5 * at) + swingRotX - rl * 0.7,
       swingRotY,
       rl * 0.4,
     );

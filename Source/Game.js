@@ -93,6 +93,10 @@ export class Game {
       if (r.loot) this.collectLoot(r.loot);
       if (this.input.consumePress("Tab"))
         this.hud.toggleInventory(this.inventory);
+      if (this.input.consumePress("KeyF")) {
+        this.viewModel.toggleTorch();
+        this.audio.click();
+      }
     }
     this.viewModel.update(
       dt,
@@ -100,6 +104,7 @@ export class Game {
       p.grounded,
     );
     this.particles.update(dt); // cosmetic: keeps settling while paused
+    this.lanterns.update(p.pos); // shared lights follow the nearest two
     this.weather.update(dt, p.pos, indoor);
     this.water.update(dt);
     this.terrain.update(elapsed);

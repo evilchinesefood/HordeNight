@@ -61,7 +61,8 @@ import { containerLayout } from "../Source/Items/LootContainers.js";
 import { Game } from "../Source/Game.js";
 import { rayGround, stepCasing } from "../Source/Engine/Particles.js";
 import { HEAD_PIVOT_Y } from "../Source/Entity/ZombieMesh.js";
-import { HEAD_Y } from "../Source/Combat/Combat.js";
+import { HEAD_Y, aimSpread } from "../Source/Combat/Combat.js";
+import { lanternLayout } from "../Source/World/Lanterns.js";
 import * as THREE from "three";
 
 let passed = 0;
@@ -843,6 +844,36 @@ test("Particles: casings fall, bounce with damping, then settle", () => {
 
 test("Rig: zombie head pivot matches Combat's analytic head sphere", () => {
   assert.equal(HEAD_PIVOT_Y, HEAD_Y);
+});
+
+test("Combat: aimSpread tightens the cone, never widens it", () => {
+  assert.equal(aimSpread(0.02, 0), 0.02);
+  assert.ok(Math.abs(aimSpread(0.02, 1) - 0.008) < 1e-12);
+  const half = aimSpread(0.055, 0.5);
+  assert.ok(half < 0.055 && half > aimSpread(0.055, 1));
+});
+
+test("Lanterns: one per roofed interior, hung below its ceiling", () => {
+  for (let seed = 1; seed <= 8; seed++) {
+    const hf = makeHeightfield(seed);
+    const layout = buildingLayout(hf);
+    const roofed = layout.structures.filter((s) =>
+      ["cabin", "barn", "shed"].includes(s.parts.kind),
+    );
+    const ls = lanternLayout(layout.structures);
+    assert.equal(ls.length, roofed.length, `seed ${seed}`);
+    roofed.forEach((s, i) => {
+      const L = ls[i];
+      assert.ok(
+        L.y > s.y + 1.4 && L.y < s.y + s.parts.H,
+        `seed ${seed}: lantern y ${L.y - s.y} vs H ${s.parts.H}`,
+      );
+      assert.ok(
+        Math.hypot(L.x - s.x, L.z - s.z) <= Math.max(s.parts.W, s.parts.D) / 2,
+        `seed ${seed}: lantern outside footprint`,
+      );
+    });
+  }
 });
 
 test("Game: best score persists only on improvement", () => {

@@ -109,6 +109,9 @@ export function meleeTargets(px, pz, dirx, dirz, zombies, range, arc) {
   return out.sort((a, b) => a.d - b.d);
 }
 
+// aiming down sights tightens the cone
+export const aimSpread = (spread, aimT) => spread * (1 - 0.6 * aimT);
+
 // perturb a normalized dir inside a cone (radians); rng in [0,1)
 export function spreadDir(dx, dy, dz, spread, rng) {
   if (spread <= 0) return { x: dx, y: dy, z: dz };
@@ -160,6 +163,8 @@ export class Combat {
     this.reloading = 0;
     this.reloadingId = null; // reload finishes on the weapon that started it
     this.meleeAt = 0; // pending swing impact timer
+    this.aimT = 0; // 0..1 aim-down-sights blend (hold RMB)
+    this.baseFov = camera.fov;
     this._dir = { x: 0, y: 0, z: 0 };
   }
 
@@ -171,6 +176,7 @@ export class Combat {
     this.reloading = w.reload;
     this.reloadingId = inv.selected;
     if (this.viewModel) this.viewModel.reload(w.reload);
+    if (this.audio) this.audio.reloadClick();
   }
 
   camDir() {
@@ -187,6 +193,7 @@ export class Combat {
   fireGun(w) {
     const inv = this.inventory;
     if (!inv.consumeRound(inv.selected)) {
+      if (this.audio) this.audio.click(); // dry trigger
       this.startReload(); // empty trigger: auto-reload if there is reserve
       return;
     }
@@ -195,7 +202,13 @@ export class Combat {
     let hits = 0;
     let headshot = false;
     for (let i = 0; i < (w.pellets || 1); i++) {
-      const s = spreadDir(d.x, d.y, d.z, w.spread, this.rng);
+      const s = spreadDir(
+        d.x,
+        d.y,
+        d.z,
+        aimSpread(w.spread, this.aimT),
+        this.rng,
+      );
       const hit = hitscan(
         o.x,
         o.y,
@@ -240,7 +253,9 @@ export class Combat {
       const yw = this.player.yaw;
       this.particles.casing(mp, { x: Math.cos(yw), z: -Math.sin(yw) });
     }
-    this.player.pitch += w.kick * (0.6 + this.rng() * 0.3);
+    // braced against the shoulder: aimed shots kick the view less
+    this.player.pitch +=
+      w.kick * (0.6 + this.rng() * 0.3) * (1 - 0.3 * this.aimT);
     if (this.audio) this.audio.shot(inv.selected);
     this.cd = 1 / w.rate;
   }
@@ -313,8 +328,24 @@ export class Combat {
         this.reloading = 0;
         inv.finishReload(this.reloadingId);
         this.reloadingId = null;
+        if (this.audio) this.audio.reloadClick();
       }
     } else if (input.consumePress("KeyR")) this.startReload();
+
+    // aim down sights: hold RMB (guns only, not mid-reload); the blend
+    // drives viewmodel pose, FOV zoom, spread, and crosshair visibility
+    const wantAim =
+      w.kind === "gun" && input.mouseDown(2) && this.reloading <= 0;
+    this.aimT += ((wantAim ? 1 : 0) - this.aimT) * (1 - Math.exp(-10 * dt));
+    if (this.aimT < 0.005) this.aimT = 0;
+    else if (this.aimT > 0.995) this.aimT = 1;
+    const fov = this.baseFov - 22 * this.aimT;
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    if (this.viewModel) this.viewModel.aimT = this.aimT;
+    if (this.hud) this.hud.setAim(this.aimT > 0.4);
 
     // pending melee impact
     if (this.meleeAt > 0) {
