@@ -3,7 +3,7 @@ import { Sky } from "three/addons/objects/Sky.js";
 import { cloudTexture, cirrusTexture } from "./Textures.js";
 import { Mulberry } from "../Core/Rng.js";
 
-const SUN_ELEVATION = 14; // low sun -> long shadows
+const SUN_ELEVATION = 55; // late-morning sun
 const SUN_AZIMUTH = 205;
 const SHADOW_SPAN = 48;
 const SHADOW_RES = 1536;
@@ -19,7 +19,7 @@ const SUN_DIR = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
 
 Object.assign(THREE.UniformsLib.fog, {
   uFogSunDir: { value: SUN_DIR.clone() },
-  uFogSunColor: { value: new THREE.Color(0xffdcae) },
+  uFogSunColor: { value: new THREE.Color(0xfff3e0) },
   uFogBaseY: { value: 2.0 },
   uFogHeightDecay: { value: 0.06 },
 });
@@ -161,22 +161,33 @@ export function createSky(scene) {
   sky.scale.setScalar(2000);
   const u = sky.material.uniforms;
   u.turbidity.value = 3;
-  u.rayleigh.value = 1.8;
-  u.mieCoefficient.value = 0.002;
+  u.rayleigh.value = 0.5;
+  u.mieCoefficient.value = 0.001;
   u.mieDirectionalG.value = 0.8;
   u.sunPosition.value.copy(SUN_DIR);
-  // the raw solar disk is ~19000x over white: clamp the dome's HDR output
-  // so UnrealBloom doesn't smear it into a sky-wide supernova
-  sky.material.fragmentShader = sky.material.fragmentShader.replace(
-    "gl_FragColor = vec4( retColor, 1.0 );",
-    "gl_FragColor = vec4( min( retColor, vec3( 5.0 ) ), 1.0 );",
-  );
+  // the raw near-sun glare sits at 3-10x white over +-20deg and the solar
+  // disk at ~19000x: ACES clips that whole region to a frame-wide blob.
+  // Two-knee luminance curve: blue sky (<1.6) untouched, glare compressed
+  // to a soft gradient, only the disk stays bright enough to clip white
+  sky.material.fragmentShader = sky.material.fragmentShader
+    .replace(
+      "gl_FragColor = vec4( retColor, 1.0 );",
+      `float skyL = dot( retColor, vec3( 0.2126, 0.7152, 0.0722 ) );
+      float skyK = skyL < 0.85 ? skyL
+        : skyL < 12.0 ? 0.85 + ( skyL - 0.85 ) * 0.18
+        : 2.857 + ( skyL - 12.0 ) * 0.0004;
+      gl_FragColor = vec4( retColor * ( skyK / max( skyL, 1e-4 ) ), 1.0 );`,
+    )
+    .replace(
+      "const float sunAngularDiameterCos = 0.999956676946448443553574619906976478926848692873900859324;",
+      "const float sunAngularDiameterCos = 0.9999893;",
+    );
   scene.add(sky);
 
   // cool base haze; the fog patch warms it toward the sun
   scene.fog = new THREE.Fog(0xc7cdd6, 70, 360);
 
-  const sun = new THREE.DirectionalLight(0xffd9a6, 3.0);
+  const sun = new THREE.DirectionalLight(0xfff1d8, 3.0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(SHADOW_RES, SHADOW_RES);
   const cam = sun.shadow.camera;
@@ -185,7 +196,7 @@ export function createSky(scene) {
   cam.near = 10;
   cam.far = 400;
   sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.03;
+  sun.shadow.normalBias = 0.15; // roof slopes striped with acne at 0.03
   // AO-excluded foliage (layer 2) must still cast canopy shadows
   cam.layers.enable(2);
   scene.add(sun, sun.target);
@@ -201,19 +212,26 @@ export function createSky(scene) {
     THREE.MathUtils.degToRad(98),
     theta,
   );
-  // overcast blend for weather: hazy turbid dome grays the sun glow
+  // overcast blend for weather: rayleigh dies (no blue), turbid milky-gray
+  // dome, clouds dim toward storm gray
+  let nightOn = false;
+  const cloudTone = (w) => (nightOn ? 0.12 : 1) * (1 - w * 0.62);
+  // NOTE: weather calls this every frame - w=0 MUST equal the clear-sky
+  // uniforms above or it silently overrides any tuning
   const setOvercast = (w) => {
     u.turbidity.value = 3 + w * 17;
-    u.mieCoefficient.value = 0.002 + w * 0.004;
-    u.rayleigh.value = 1.8 - w * 1.1;
+    u.mieCoefficient.value = 0.001 + w * 0.007;
+    u.rayleigh.value = 0.5 - w * 0.32;
+    clouds.setTone(cloudTone(w));
   };
   const setNight = (on) => {
+    nightOn = on;
     u.sunPosition.value.copy(on ? NIGHT_DIR : SUN_DIR);
     sun.intensity = on ? 0.4 : 3.0;
-    sun.color.set(on ? 0x91a8d0 : 0xffd9a6);
+    sun.color.set(on ? 0x91a8d0 : 0xfff1d8);
     hemi.intensity = on ? 0.2 : 1.05;
     amb.intensity = on ? 0.28 : 0.8;
-    clouds.setTone(on ? 0.12 : 1); // unlit billboards: dim them by hand
+    clouds.setTone(cloudTone(0)); // unlit billboards: dim them by hand
     return sun.intensity; // new weather baseline
   };
 

@@ -48,7 +48,12 @@ function makeMats() {
     log: std(plankTextureSet(31)),
     wood: std(plankTextureSet(41, "#7d6e5a")),
     barn: std(plankTextureSet(51, "#7d3b2c", "#7a5f3e")),
-    roof: std(shingleTextureSet(33), { side: THREE.DoubleSide }),
+    roof: std(shingleTextureSet(33), {
+      side: THREE.DoubleSide,
+      // DoubleSide writes both faces into the shadow map at identical
+      // depth -> guaranteed acne stripes on the slopes; front faces only
+      shadowSide: THREE.FrontSide,
+    }),
     stone: std(stoneTextureSet(35)),
     barrel: std(barrelTextureSet(37), { vertexColors: false }),
     dark: new THREE.MeshStandardMaterial({
