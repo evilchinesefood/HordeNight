@@ -93,6 +93,18 @@ export function leafClusterTexture(seed = 11, pine = false) {
       ctx.fill();
     }
   }
+  // transparent texels are black -> linear filtering bleeds dark halos at
+  // alpha-tested edges; backfill rgb with a foliage tone (alpha stays 0)
+  const img = ctx.getImageData(0, 0, S, S);
+  const d = img.data;
+  const f = pine ? [46, 86, 50] : [60, 102, 44];
+  for (let i = 0; i < d.length; i += 4)
+    if (d[i + 3] < 16) {
+      d[i] = f[0];
+      d[i + 1] = f[1];
+      d[i + 2] = f[2];
+    }
+  ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.generateMipmaps = false;

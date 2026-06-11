@@ -272,6 +272,10 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
           topY: t.y + targetH * 0.55,
         });
       });
+      // alpha-tested cards stamp solid squares into the GTAO pre-passes
+      // (override materials ignore alphaTest) -> AO-excluded layer; the sun
+      // shadow camera has layer 2 enabled so canopies still cast shadows
+      leaves.layers.set(2);
       for (const mesh of [branches, leaves]) {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
@@ -333,6 +337,7 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
           mesh.setColorAt(j, col.setRGB(d.tint[0], d.tint[1], d.tint[2]));
         });
         mesh.visible = false;
+        mesh.layers.set(2); // same square-stamp problem at distance
         group.add(mesh);
         impChunks.push({
           mesh,
