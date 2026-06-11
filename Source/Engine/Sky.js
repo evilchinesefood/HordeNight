@@ -243,39 +243,47 @@ export function createSky(scene) {
   const amb = new THREE.AmbientLight(0x4e5c78, 0.8);
   scene.add(hemi, amb);
 
-  // dev/night preset: sun dips below the horizon, moonlight takes over
-  const NIGHT_DIR = new THREE.Vector3().setFromSphericalCoords(
-    1,
-    THREE.MathUtils.degToRad(98),
-    theta,
-  );
+  // continuous day->night blend (0..1): the DOME sun sinks below the horizon
+  // while the shadow-casting light stays geometrically fixed (autoUpdate=false
+  // shadows never re-render for the cycle) and only dims/cools. phi 35deg
+  // (day, 55deg elevation) -> 98deg (8deg below horizon, the M3 night preset)
+  const PHI_DAY = phi;
+  const PHI_NIGHT = THREE.MathUtils.degToRad(98);
+  const SUN_COL_DAY = new THREE.Color(0xfff1d8);
+  const SUN_COL_NIGHT = new THREE.Color(0x91a8d0);
+  let nightMix = 0;
   // overcast blend for weather: rayleigh dies (no blue), turbid milky-gray
-  // dome, clouds dim toward storm gray
-  let nightOn = false;
-  const cloudTone = (w) => (nightOn ? 0.12 : 1) * (1 - w * 0.62);
-  // NOTE: weather calls this every frame - w=0 MUST equal the clear-sky
-  // uniforms above or it silently overrides any tuning
+  // dome, clouds dim toward storm gray; composes with the night dimming
+  const cloudTone = (w) => (1 - nightMix * 0.88) * (1 - w * 0.62);
+  // NOTE: weather re-applies this whenever its cache invalidates - w=0 MUST
+  // equal the clear-sky uniforms above or it silently overrides any tuning
   const setOvercast = (w) => {
     u.turbidity.value = CLEAR.turbidity + w * 22;
     u.mieCoefficient.value = CLEAR.mie + w * 0.007;
     u.rayleigh.value = CLEAR.rayleigh - w * 0.46; // blue dies fully in a storm
     u.uDim.value = 1 - w * 0.55; // and the dome itself darkens
     // the shared fog in-scatter tint follows: gray in storms, dark at night
-    if (nightOn) FOG_SUN_COLOR.copy(FOG_SUN_NIGHT);
-    else FOG_SUN_COLOR.copy(FOG_SUN_DAY).lerp(FOG_SUN_WET, w * 0.8);
+    FOG_SUN_COLOR.copy(FOG_SUN_DAY)
+      .lerp(FOG_SUN_WET, w * 0.8)
+      .lerp(FOG_SUN_NIGHT, nightMix);
     clouds.setTone(cloudTone(w));
   };
-  const setNight = (on) => {
-    nightOn = on;
-    FOG_SUN_COLOR.copy(on ? FOG_SUN_NIGHT : FOG_SUN_DAY);
-    u.sunPosition.value.copy(on ? NIGHT_DIR : SUN_DIR);
-    sun.intensity = on ? 0.4 : 3.0;
-    sun.color.set(on ? 0x91a8d0 : 0xfff1d8);
-    hemi.intensity = on ? 0.2 : 1.05;
-    amb.intensity = on ? 0.28 : 0.8;
+  const setNightMix = (m) => {
+    nightMix = m;
+    FOG_SUN_COLOR.copy(FOG_SUN_DAY).lerp(FOG_SUN_NIGHT, m);
+    u.sunPosition.value.setFromSphericalCoords(
+      1,
+      THREE.MathUtils.lerp(PHI_DAY, PHI_NIGHT, m),
+      theta,
+    );
+    sun.intensity = THREE.MathUtils.lerp(3.0, 0.4, m);
+    sun.color.lerpColors(SUN_COL_DAY, SUN_COL_NIGHT, m);
+    hemi.intensity = THREE.MathUtils.lerp(1.05, 0.2, m);
+    amb.intensity = THREE.MathUtils.lerp(0.8, 0.28, m); // moonlight floor
     clouds.setTone(cloudTone(0)); // unlit billboards: dim them by hand
     return sun.intensity; // new weather baseline
   };
+  const setNight = (on) => setNightMix(on ? 1 : 0);
 
   const clouds = createClouds(scene);
 
@@ -303,5 +311,5 @@ export function createSky(scene) {
   };
   update(new THREE.Vector3());
 
-  return { sun, sunDir: SUN_DIR, update, setNight, setOvercast };
+  return { sun, sunDir: SUN_DIR, update, setNight, setNightMix, setOvercast };
 }

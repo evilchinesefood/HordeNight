@@ -22,7 +22,16 @@ import {
 import { fillTerrain, makeGridSampler } from "../Source/World/TerrainFill.js";
 import { makeGrid } from "../Source/Engine/SpatialGrid.js";
 import { seek, whiskerAvoid, separation } from "../Source/Entity/Steering.js";
-import { tick, pickSpawnPoint } from "../Source/Entity/Spawner.js";
+import { tick, pickSpawnPoint, spawnParams } from "../Source/Entity/Spawner.js";
+import {
+  phaseAt,
+  nightMixAt,
+  clockAt,
+  DayNightCycle,
+  DAY_LEN,
+  DUSK_LEN,
+  CYCLE_LEN,
+} from "../Source/Systems/DayNightCycle.js";
 import {
   makeZombie,
   step,
@@ -473,6 +482,73 @@ test("Zombie: slides around a wall without ever clipping it", () => {
   }
   const d1 = Math.hypot(z.x + 3, z.z);
   assert.ok(d1 < d0 - 1.5, `made no progress around the wall: ${d1}`);
+});
+
+test("DayNight: phases in order, mix ramps across dusk/dawn", () => {
+  assert.equal(phaseAt(0).phase, "DAY");
+  assert.equal(phaseAt(DAY_LEN + 1).phase, "DUSK");
+  assert.equal(phaseAt(DAY_LEN + DUSK_LEN + 1).phase, "NIGHT");
+  assert.equal(phaseAt(CYCLE_LEN - 1).phase, "DAWN");
+  assert.equal(phaseAt(CYCLE_LEN).phase, "DAY"); // wraps
+  assert.equal(nightMixAt(10), 0);
+  assert.ok(Math.abs(nightMixAt(DAY_LEN + DUSK_LEN / 2) - 0.5) < 1e-9);
+  assert.equal(nightMixAt(DAY_LEN + DUSK_LEN + 5), 1);
+  assert.ok(nightMixAt(CYCLE_LEN - 1) < 1); // dawn ramps back down
+  assert.equal(clockAt(0), "07:00");
+  assert.equal(clockAt(CYCLE_LEN / 2), "19:00");
+});
+
+test("DayNight: night counting, dawn events, dev jump", () => {
+  const c = new DayNightCycle();
+  let dawns = 0;
+  for (let t = 0; t < CYCLE_LEN * 2.5; t += 0.5) {
+    if (c.update(0.5).dawned) dawns++;
+  }
+  assert.equal(c.night, 2); // two dusks passed in 2.5 cycles
+  assert.equal(dawns, 2); // both nights survived
+  // jump applies lighting immediately and bumps the night counter
+  let applied = null;
+  const c2 = new DayNightCycle((m) => (applied = m));
+  assert.equal(applied, 0);
+  c2.jump("NIGHT");
+  assert.equal(c2.phase, "NIGHT");
+  assert.equal(c2.night, 1);
+  assert.equal(applied, 1);
+  c2.jump("DAY");
+  assert.equal(applied, 0);
+  assert.equal(c2.night, 1); // day jump never counts a night
+  // no double-count when update crosses the same boundary after a jump
+  const c3 = new DayNightCycle();
+  c3.jump("NIGHT");
+  c3.update(0.5);
+  assert.equal(c3.night, 1);
+});
+
+test("Spawner: difficulty curve - day calm, night ramps with night number", () => {
+  const d = spawnParams("DAY", 3);
+  const n1 = spawnParams("NIGHT", 1);
+  const n4 = spawnParams("NIGHT", 4);
+  assert.ok(d.cap < n1.cap && d.rate < n1.rate);
+  assert.ok(n4.cap > n1.cap && n4.rate > n1.rate);
+  assert.ok(n4.speedMul > n1.speedMul);
+  assert.ok(spawnParams("NIGHT", 99).cap <= 40); // stays under the 48 pool
+  assert.ok(spawnParams("NIGHT", 99).speedMul <= 1.45);
+  assert.ok(spawnParams("DUSK", 1).cap > d.cap);
+  assert.deepEqual(spawnParams("DAWN", 5), spawnParams("DAY", 5));
+});
+
+test("Zombie: flee runs away from the player and never attacks", () => {
+  const z = makeZombie(2, 0, 0.05);
+  z.flee = true;
+  let hits = 0;
+  for (let i = 0; i < 300; i++) {
+    step(z, 0, 0, [], [z], 1 / 60);
+    if (z.attacked) hits++;
+  }
+  assert.ok(Math.hypot(z.x, z.z) > 7, "did not run away");
+  assert.equal(hits, 0);
+  assert.equal(z.state, "FLEE");
+  assert.ok(z.fleeT > 4.9);
 });
 
 test("Player: takeDamage clamps at zero and sets dead exactly once", () => {

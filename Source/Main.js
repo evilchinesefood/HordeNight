@@ -152,7 +152,7 @@ const zombies = new Zombies({
 });
 scene.add(zombies.group);
 const game = new Game(
-  { player, zombies, weather, water, terrain, veg, sky, audio, hf },
+  { player, zombies, weather, water, terrain, veg, sky, audio, hf, hud },
   () => {
     hud.flashDeath();
     document.exitPointerLock?.();
@@ -181,14 +181,9 @@ if (DEBUG) {
     devMenu.appendChild(b);
     return b;
   };
-  const applyNight = (on) => {
-    weather.setBaseSun(sky.setNight(on));
-    veg.setNight(on);
-    weather.baseCol.set(on ? 0x121722 : 0xc7cdd6); // fog baseline follows
-    renderer.shadowMap.needsUpdate = true;
-  };
-  devBtn("Day", () => applyNight(false));
-  devBtn("Night", () => applyNight(true));
+  // jump the running cycle; its apply hook relights everything immediately
+  devBtn("Day", () => game.dayNight.jump("DAY"));
+  devBtn("Night", () => game.dayNight.jump("NIGHT"));
   const rainLabel = () =>
     weather.force === null
       ? "Rain: auto"
@@ -304,7 +299,6 @@ const indoorNow = () =>
 let last = performance.now();
 let lastDraw = 0;
 let elapsed = 0;
-let lastHealth = player.health;
 renderer.setAnimationLoop(() => {
   const now = performance.now();
   // paused behind the translucent overlay: ~30fps is plenty (battery/thermal)
@@ -318,11 +312,6 @@ renderer.setAnimationLoop(() => {
     indoor: indoorNow(),
   });
   if (res.shadowDirty) renderer.shadowMap.needsUpdate = true;
-  if (player.health !== lastHealth) {
-    if (player.health < lastHealth) hud.flashDamage();
-    hud.setHealth(player.health / player.maxHealth);
-    lastHealth = player.health;
-  }
   if (statsHud) {
     renderer.info.reset();
     statsHud.tick();

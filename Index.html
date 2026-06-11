@@ -87,6 +87,28 @@
       #DamageFlash.Death {
         background: rgba(110, 0, 0, 0.92);
       }
+      #Clock {
+        position: fixed;
+        top: 12px;
+        right: 14px;
+        z-index: 5;
+        pointer-events: none;
+        text-align: right;
+        font-family: monospace;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+      }
+      #ClockTime {
+        display: block;
+        font-size: 20px;
+        color: #e8e4d8;
+      }
+      #ClockNight {
+        display: block;
+        font-size: 12px;
+        color: #c89a8a;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+      }
     </style>
   </head>
   <body>
@@ -100,6 +122,9 @@
     </div>
     <div id="Hud">
       <div id="HealthBar"><div id="HealthFill"></div></div>
+    </div>
+    <div id="Clock">
+      <span id="ClockTime">07:00</span><span id="ClockNight"></span>
     </div>
     <div id="DamageFlash"></div>
     <script>

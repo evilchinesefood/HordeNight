@@ -4,6 +4,19 @@ export class Hud {
   constructor() {
     this.fill = document.getElementById("HealthFill");
     this.flash = document.getElementById("DamageFlash");
+    this.clockTime = document.getElementById("ClockTime");
+    this.clockNight = document.getElementById("ClockNight");
+    this.lastClock = "";
+  }
+
+  setClock(time, phase, night) {
+    const key = time + phase + night;
+    if (key === this.lastClock || !this.clockTime) return;
+    this.lastClock = key;
+    this.clockTime.textContent = time;
+    const dark = phase === "NIGHT" || phase === "DUSK";
+    this.clockTime.style.color = dark ? "#9fb4dd" : "#e8e4d8";
+    this.clockNight.textContent = night > 0 ? `Night ${night}` : "";
   }
 
   setHealth(frac) {

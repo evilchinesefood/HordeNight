@@ -30,6 +30,8 @@ export const makeZombie = (x, z, cd = 0.5, speed = 2.5) => ({
   state: "CHASE",
   attacked: false,
   active: true,
+  flee: false, // dawn survivors run out and despawn
+  fleeT: 0,
 });
 
 export function step(z, px, pz, nearby, neighbors, dt) {
@@ -41,7 +43,17 @@ export function step(z, px, pz, nearby, neighbors, dt) {
   let wantX = 0;
   let wantZ = 0;
   const sep = separation(z.x, z.z, neighbors, SEP_RADIUS);
-  if (dist < ATTACK_RANGE) {
+  if (z.flee) {
+    z.state = "FLEE";
+    z.fleeT += dt;
+    const s = seek(px, pz, z.x, z.z); // away from the player
+    const a = whiskerAvoid(z.x, z.z, s.x, s.z, nearby, Z_RADIUS + 0.05);
+    wantX = s.x + a.x * 1.5 + sep.x * 0.8;
+    wantZ = s.z + a.z * 1.5 + sep.z * 0.8;
+    const len = Math.hypot(wantX, wantZ) || 1;
+    wantX = (wantX / len) * z.speed;
+    wantZ = (wantZ / len) * z.speed;
+  } else if (dist < ATTACK_RANGE) {
     z.state = "ATTACK";
     z.cd -= dt;
     if (z.cd <= 0) {
@@ -97,7 +109,7 @@ export function step(z, px, pz, nearby, neighbors, dt) {
   // face the player in range, otherwise face travel; shortest-arc turn
   const speedH = Math.hypot(z.vx, z.vz);
   const target =
-    dist < ATTACK_RANGE || speedH < 0.2
+    !z.flee && (dist < ATTACK_RANGE || speedH < 0.2)
       ? Math.atan2(-dx, -dz)
       : Math.atan2(-z.vx, -z.vz);
   let dy = target - z.yaw;

@@ -4,14 +4,14 @@
 // the world's Mulberry streams are touched here.
 import { makeGrid } from "../Engine/SpatialGrid.js";
 import { ZombieMesh } from "./ZombieMesh.js";
-import { tick, pickSpawnPoint } from "./Spawner.js";
+import { tick, pickSpawnPoint, spawnParams } from "./Spawner.js";
 import { makeZombie, step, ATTACK_DMG, Z_RADIUS } from "./Zombie.js";
 import { isClearAt } from "../Core/Placement.js";
 
 const MAX_POOL = 48;
-const CAP = 24;
-const SPAWN_RATE = 0.7; // spawns/sec while under cap
 const RECYCLE_DIST = 75;
+const FLEE_DESPAWN = 40; // dawn survivors vanish once far enough out
+const FLEE_TIMEOUT = 15;
 const GRID_CELL = 8;
 const QUERY_R = 3.5; // covers whisker length + zombie radius
 
@@ -65,6 +65,7 @@ export class Zombies {
       0.5 + this.rng() * 0.6,
       2.1 + this.rng() * 0.9,
     );
+    z.baseSpeed = z.speed; // night escalation scales from this
     z.scale = 0.92 + this.rng() * 0.16;
     z.phase = this.rng() * Math.PI * 2;
     z.y = this.heightAt(p.x, p.z);
@@ -78,29 +79,40 @@ export class Zombies {
     for (let i = 0; i < n; i++) if (!this.trySpawn(player)) break;
   }
 
-  update(dt, player) {
+  update(dt, player, cycle = { phase: "NIGHT", night: 1, dawned: false }) {
     const px = player.pos.x;
     const pz = player.pos.z;
+    const params = spawnParams(cycle.phase, cycle.night);
     let count = 0;
     for (const z of this.pool) {
       if (!z.active) continue;
+      if (cycle.dawned) {
+        z.flee = true; // the horde breaks at first light
+        z.fleeT = 0;
+      }
       const dx = z.x - px;
       const dz = z.z - pz;
-      if (dx * dx + dz * dz > RECYCLE_DIST * RECYCLE_DIST) z.active = false;
+      const d2 = dx * dx + dz * dz;
+      if (
+        d2 > RECYCLE_DIST * RECYCLE_DIST ||
+        (z.flee && (d2 > FLEE_DESPAWN * FLEE_DESPAWN || z.fleeT > FLEE_TIMEOUT))
+      )
+        z.active = false;
       else count++;
     }
     const t = tick({
       active: count,
-      cap: CAP,
+      cap: params.cap,
       accum: this.accum,
       dt,
-      rate: SPAWN_RATE,
+      rate: params.rate,
     });
     this.accum = t.accum;
     for (let i = 0; i < t.spawns; i++) this.trySpawn(player);
 
     this.active = this.pool.filter((z) => z.active);
     for (const z of this.active) {
+      z.speed = (z.baseSpeed ?? z.speed) * params.speedMul;
       const nearby = this.grid.queryRadius(z.x, z.z, QUERY_R);
       step(z, px, pz, nearby, this.active, dt);
       z.y = this.heightAt(z.x, z.z);

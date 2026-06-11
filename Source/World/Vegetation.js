@@ -621,8 +621,15 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
       for (const mesh of g.imp) mesh.material.opacity = g.fade;
     }
   };
-  // night preset: kill the warm sun-through-blades backlight
-  const setNight = (on) => uSunCol.value.set(on ? 0x2c3a55 : 0xffe9b8);
+  // night blend: kill the warm sun-through-blades backlight (bool or 0..1)
+  const GRASS_SUN_DAY = new THREE.Color(0xffe9b8);
+  const GRASS_SUN_NIGHT = new THREE.Color(0x2c3a55);
+  const setNight = (on) =>
+    uSunCol.value.lerpColors(
+      GRASS_SUN_DAY,
+      GRASS_SUN_NIGHT,
+      typeof on === "number" ? on : on ? 1 : 0,
+    );
 
   // drop build-only intermediates: the returned closures would otherwise pin
   // the whole factory context (placement arrays, cell keys) for the session

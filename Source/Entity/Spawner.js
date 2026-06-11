@@ -8,6 +8,20 @@ const TRIES = 14;
 // VIEW_OFF = 2pi/3 a forward cone of 120deg never receives a spawn
 const VIEW_OFF = (Math.PI * 2) / 3;
 
+// phase-gated difficulty: day trickle of wanderers, dusk ramp, night horde
+// scaling with the night number (cap stays under the 48 pool)
+export function spawnParams(phase, night) {
+  if (phase === "DAY" || phase === "DAWN")
+    return { cap: 3, rate: 0.05, speedMul: 1 };
+  if (phase === "DUSK") return { cap: 8, rate: 0.3, speedMul: 1 };
+  const n = Math.max(1, night);
+  return {
+    cap: Math.min(16 + n * 4, 40),
+    rate: Math.min(0.5 + n * 0.12, 1.6),
+    speedMul: Math.min(1 + (n - 1) * 0.05, 1.45),
+  };
+}
+
 export function tick({ active, cap, accum, dt, rate }) {
   let a = accum + dt * rate;
   let spawns = 0;
