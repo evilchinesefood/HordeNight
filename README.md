@@ -2,8 +2,6 @@
 
 First-person 3D zombie-survival game (7 Days to Die-inspired) built with [Three.js](https://threejs.org/) and Vite. Full design: [docs/superpowers/specs/2026-06-10-hordenight-design.md](docs/superpowers/specs/2026-06-10-hordenight-design.md).
 
-**Current status: Milestone 1** — an explorable, atmospheric world with first-person movement. No gameplay systems yet.
-
 ## What's in the world
 
 - **Terrain** — seeded procedural heightfield (simplex FBM), rolling hills, vertex-color surface that shifts between grass, dirt, and rock by height and slope.
@@ -27,10 +25,6 @@ npm run format   # prettier
 ```
 
 Open the printed URL and click to lock the pointer.
-
-## Deploy
-
-`base: "./"` keeps the build subpath-friendly. The entry is `Index.html` (PascalCase), so Apache hosts need `DirectoryIndex Index.html` in `.htaccess`.
 
 ## Layout
 
