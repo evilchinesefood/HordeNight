@@ -66,7 +66,7 @@ scene.add(terrain.mesh);
 const water = createWater(terrain.heightTex);
 scene.add(water.mesh);
 await new Promise((r) => setTimeout(r));
-const veg = createVegetation(hf, terrain.heightTex);
+const veg = createVegetation(hf, terrain.heightTex, renderer);
 scene.add(veg.group);
 await new Promise((r) => setTimeout(r));
 const buildings = createBuildings(hf);
@@ -208,4 +208,11 @@ renderer.setAnimationLoop(() => {
 });
 
 // debug handle for automated smoke tests
-window.HN = { player, hf, scene, renderer, camera };
+window.HN = { player, hf, scene, renderer, camera, veg };
+const tp = new URLSearchParams(location.search).get("tp");
+if (tp) {
+  const [x, z, yaw] = tp.split(",").map(Number);
+  player.pos.set(x, hf.heightAt(x, z), z);
+  player.yaw = yaw || 0;
+  player.update(0);
+}

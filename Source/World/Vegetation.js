@@ -15,7 +15,7 @@ const TREE_TRIES = 9000;
 const TREE_CELL = 5;
 const TREE_CAP = 1500;
 const CHUNKS = 10; // NxN world grid per variant so camera + shadow frustums can cull
-const HANDOFF = 88; // chunk-center distance where full detail swaps to impostors
+const HANDOFF = 64; // chunk-center distance where full detail swaps to impostors
 const LOD_DIST = HANDOFF + 29; // + chunk half-diagonal margin (40m cells)
 const SHRUB_COUNT = 280;
 const GRASS_TILE = 64;
@@ -70,7 +70,51 @@ function buildVariant(spec) {
   };
 }
 
-export function createVegetation(hf, heightTex) {
+// render a tree variant to a small RT: impostor cards get the real
+// silhouette + colors instead of a painted approximation
+function bakeImpostorTexture(renderer, src) {
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight(0xffffff, Math.PI * 0.85));
+  const sun = new THREE.DirectionalLight(0xffffff, Math.PI * 0.4);
+  sun.position.set(1.5, 2.5, 2);
+  scene.add(sun);
+  const leafBake = new THREE.MeshStandardMaterial({
+    map: src.leafMap,
+    alphaTest: 0.35,
+    side: THREE.DoubleSide,
+    roughness: 1,
+  });
+  scene.add(new THREE.Mesh(src.branchGeo, src.barkMat));
+  scene.add(new THREE.Mesh(src.leafGeo, leafBake));
+  const w = src.impW * 1.04;
+  const cam = new THREE.OrthographicCamera(
+    -w / 2,
+    w / 2,
+    src.impTop * 1.02,
+    0,
+    0.1,
+    w * 4,
+  );
+  cam.position.set(0, 0, w * 2);
+  const rt = new THREE.WebGLRenderTarget(256, 512);
+  const prevTarget = renderer.getRenderTarget();
+  const prevTone = renderer.toneMapping;
+  const prevClear = new THREE.Color();
+  renderer.getClearColor(prevClear);
+  const prevAlpha = renderer.getClearAlpha();
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.setClearColor(0x2c4020, 0); // green bleed, not black halos
+  renderer.setRenderTarget(rt);
+  renderer.clear();
+  renderer.render(scene, cam);
+  renderer.setRenderTarget(prevTarget);
+  renderer.toneMapping = prevTone;
+  renderer.setClearColor(prevClear, prevAlpha);
+  leafBake.dispose();
+  return rt.texture;
+}
+
+export function createVegetation(hf, heightTex, renderer) {
   const rng = Mulberry(hf.seed + 31);
   const group = new THREE.Group();
   const trunkColliders = [];
@@ -121,8 +165,19 @@ export function createVegetation(hf, heightTex) {
   };
   const fullChunks = [];
   const impChunks = [];
+  // world-grid chunk index (frustum culling unit)
+  const chunkOf = (t) =>
+    Math.min(CHUNKS - 1, ((t.x + HALF) / ((HALF * 2) / CHUNKS)) | 0) * CHUNKS +
+    Math.min(CHUNKS - 1, ((t.z + HALF) / ((HALF * 2) / CHUNKS)) | 0);
+  // one variant per species per chunk: species cluster naturally and a near
+  // chunk costs 4 draw calls instead of 12
+  const variantOf = (t) => {
+    const k = chunkOf(t);
+    return (((k / CHUNKS) | 0) * 7 + (k % CHUNKS) * 13) % 3;
+  };
   // per-species impostor instances bucketed by chunk: key -> [{x,y,z,ry,w,h,tint}]
   const impData = { pine: new Map(), oak: new Map() };
+  const bakeSrc = {}; // first variant per species feeds the impostor bake
 
   const addTreeVariant = (spec, items, heightOf, isPine) => {
     if (!items.length) return;
@@ -153,12 +208,17 @@ export function createVegetation(hf, heightTex) {
     const lb = variant.leafGeo.boundingBox;
     const impTop = Math.max(variant.height, lb.max.y);
     const impW = Math.max(lb.max.x - lb.min.x, lb.max.z - lb.min.z);
+    const species = isPine ? "pine" : "oak";
+    if (!bakeSrc[species])
+      bakeSrc[species] = {
+        branchGeo: variant.branchGeo,
+        barkMat,
+        leafGeo: variant.leafGeo,
+        leafMap: leafMat.map,
+        impTop,
+        impW,
+      };
 
-    // bucket instances into world-grid chunks so frustum culling works
-    const chunkOf = (t) =>
-      Math.min(CHUNKS - 1, ((t.x + HALF) / ((HALF * 2) / CHUNKS)) | 0) *
-        CHUNKS +
-      Math.min(CHUNKS - 1, ((t.z + HALF) / ((HALF * 2) / CHUNKS)) | 0);
     const buckets = new Map();
     items.forEach((t, i) => {
       const k = chunkOf(t);
@@ -228,7 +288,7 @@ export function createVegetation(hf, heightTex) {
   PINE_SPECS.forEach((spec, k) =>
     addTreeVariant(
       spec,
-      pines.filter((_, i) => i % 3 === k),
+      pines.filter((t) => variantOf(t) === k),
       (s) => 6.5 + s * 4,
       true,
     ),
@@ -236,7 +296,7 @@ export function createVegetation(hf, heightTex) {
   OAK_SPECS.forEach((spec, k) =>
     addTreeVariant(
       spec,
-      oaks.filter((_, i) => i % 3 === k),
+      oaks.filter((t) => variantOf(t) === k),
       (s) => 5 + s * 3,
       false,
     ),
@@ -254,16 +314,16 @@ export function createVegetation(hf, heightTex) {
     const cell = (HALF * 2) / CHUNKS;
     for (const species of ["pine", "oak"]) {
       const mat = new THREE.MeshStandardMaterial({
-        map: impostorCardTexture(
-          species === "pine" ? 3 : 4,
-          species === "pine",
-        ),
+        map: bakeSrc[species]
+          ? bakeImpostorTexture(renderer, bakeSrc[species])
+          : impostorCardTexture(species === "pine" ? 3 : 4, species === "pine"),
         alphaTest: 0.3,
         side: THREE.DoubleSide,
         roughness: 1,
       });
       for (const [key, arr] of impData[species]) {
-        const mesh = new THREE.InstancedMesh(unitCard, mat, arr.length);
+        // per-chunk material clone (same program) so the LOD swap can dissolve
+        const mesh = new THREE.InstancedMesh(unitCard, mat.clone(), arr.length);
         arr.forEach((d, j) => {
           m.makeRotationY(d.ry);
           m.scale(v.set(d.w, d.h, d.w));
@@ -442,25 +502,60 @@ export function createVegetation(hf, heightTex) {
   }
   let lodX = 1e9;
   let lodZ = 1e9;
+  let lastT = 0;
+  const fading = new Set();
+  const FADE = 3.2; // dissolve speed (1/s)
   const update = (t, camPos) => {
     uTime.value = t;
+    const dt = Math.max(0, Math.min(t - lastT, 0.1));
+    lastT = t;
     if (!camPos) return;
     uCamPos.value.copy(camPos);
-    if ((camPos.x - lodX) ** 2 + (camPos.z - lodZ) ** 2 < 4) return;
-    lodX = camPos.x;
-    lodZ = camPos.z;
-    for (const g of lodGroups.values()) {
-      const d2 = (camPos.x - g.cx) ** 2 + (camPos.z - g.cz) ** 2;
-      const on =
-        g.on === undefined
-          ? d2 < LOD_DIST * LOD_DIST
-          : g.on
-            ? d2 < (LOD_DIST + 4) ** 2
-            : d2 < (LOD_DIST - 4) ** 2;
-      if (on === g.on) continue;
-      g.on = on;
-      for (const mesh of g.full) mesh.visible = on;
-      for (const mesh of g.imp) mesh.visible = !on;
+    if ((camPos.x - lodX) ** 2 + (camPos.z - lodZ) ** 2 >= 4) {
+      lodX = camPos.x;
+      lodZ = camPos.z;
+      for (const g of lodGroups.values()) {
+        const d2 = (camPos.x - g.cx) ** 2 + (camPos.z - g.cz) ** 2;
+        const on =
+          g.on === undefined
+            ? d2 < LOD_DIST * LOD_DIST
+            : g.on
+              ? d2 < (LOD_DIST + 4) ** 2
+              : d2 < (LOD_DIST - 4) ** 2;
+        if (on === g.on) continue;
+        const first = g.on === undefined;
+        g.on = on;
+        if (first) {
+          // initial state: no dissolve
+          for (const mesh of g.full) mesh.visible = on;
+          for (const mesh of g.imp) mesh.visible = !on;
+          continue;
+        }
+        // cross-dissolve: full trees stay while the impostor fades in/out
+        for (const mesh of g.full) mesh.visible = true;
+        for (const mesh of g.imp) {
+          mesh.visible = true;
+          mesh.material.transparent = true;
+        }
+        g.fade = g.fade ?? (on ? 1 : 0);
+        fading.add(g);
+      }
+    }
+    for (const g of fading) {
+      g.fade += (g.on ? -1 : 1) * FADE * dt;
+      const done = g.on ? g.fade <= 0 : g.fade >= 1;
+      if (done) {
+        g.fade = g.on ? 0 : 1;
+        fading.delete(g);
+        for (const mesh of g.full) mesh.visible = g.on;
+        for (const mesh of g.imp) {
+          mesh.visible = !g.on;
+          mesh.material.transparent = false;
+          mesh.material.opacity = 1;
+        }
+        continue;
+      }
+      for (const mesh of g.imp) mesh.material.opacity = g.fade;
     }
   };
   return { group, trunkColliders, update };
