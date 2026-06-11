@@ -18,6 +18,7 @@ import { Zombies } from "./Entity/Zombies.js";
 import { Game } from "./Game.js";
 import { Hud } from "./Hud.js";
 import { Inventory } from "./Items/Inventory.js";
+import { LootContainers } from "./Items/LootContainers.js";
 import { Combat } from "./Combat/Combat.js";
 import { ViewModel } from "./Combat/ViewModel.js";
 
@@ -97,6 +98,15 @@ const buildings = createBuildings(hfp);
 scene.add(buildings.group);
 const clutter = createClutter(hfp, buildings.colliders);
 scene.add(clutter.group);
+const loot = new LootContainers({
+  heightAt: terrain.gridHeightAt,
+  structures: buildings.structures,
+  barrels: buildings.props.barrels,
+  seed: SEED,
+});
+scene.add(loot.group);
+// crates/cabinets block movement alongside the building walls
+const colliderBoxes = buildings.colliders.concat(loot.boxes());
 
 // the world never moves after assembly: freeze matrices so the 600+ static
 // objects skip recomposition in every render (beauty + GTAO pre-pass)
@@ -107,6 +117,7 @@ for (const root of [
   veg.group,
   buildings.group,
   clutter.group,
+  loot.group,
 ])
   root.traverse((o) => (o.matrixAutoUpdate = false));
 
@@ -131,12 +142,12 @@ const worldCircles = [
   ...clutter.circles,
   ...buildings.circles,
 ];
-const spawn = findSpawn(hfp, worldCircles, buildings.colliders);
+const spawn = findSpawn(hfp, worldCircles, colliderBoxes);
 const player = new Player(
   camera,
   input,
   hf,
-  buildings.colliders,
+  colliderBoxes,
   worldCircles,
   spawn,
   {
@@ -149,19 +160,13 @@ const hud = new Hud();
 const zombies = new Zombies({
   heightAt: terrain.gridHeightAt,
   hf: hfp,
-  boxes: buildings.colliders,
+  boxes: colliderBoxes,
   circles: worldCircles,
   rng: Mulberry(SEED * 7919 + 1), // own stream: world draws stay untouched
 });
 scene.add(zombies.group);
 scene.add(camera); // the first-person viewmodel hangs off the camera
-const inventory = new Inventory();
-// dev arsenal until Stage C loot lands: every gun + deep reserves
-for (const w of ["pistol", "shotgun", "rifle"]) inventory.addItem(w);
-inventory.addItem("9mm", 240);
-inventory.addItem("shell", 60);
-inventory.addItem("5.56", 270);
-inventory.addItem("bandage", 3);
+const inventory = new Inventory(); // bat only - guns come from loot
 const viewModel = new ViewModel(camera);
 const combat = new Combat({
   camera,
@@ -189,13 +194,18 @@ const game = new Game(
     inventory,
     combat,
     viewModel,
+    loot,
   },
   () => {
     hud.flashDeath();
     document.exitPointerLock?.();
-    setTimeout(() => location.reload(), 1100);
+    // M5 death screen replaces the M3 hard reload; restart is the button
+    setTimeout(() => hud.showDeath(game.nightsSurvived, game.best), 900);
   },
 );
+document
+  .getElementById("RestartBtn")
+  .addEventListener("click", () => location.reload());
 
 // dev menu (?debug only): force day/night/rain, spawn waves; shows while paused
 let devMenu = null;
@@ -371,6 +381,8 @@ window.HN = {
   hud,
   combat,
   inventory,
+  loot,
+  input,
 };
 const tp = QS.get("tp");
 if (tp) {

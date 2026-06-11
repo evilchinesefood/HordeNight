@@ -52,6 +52,13 @@ import {
 } from "../Source/Combat/Combat.js";
 import { WEAPONS } from "../Source/Combat/WeaponDB.js";
 import { Inventory, HEAL_AMOUNT } from "../Source/Items/Inventory.js";
+import {
+  rollLoot,
+  nearestSearchable,
+  LOOT_TABLES,
+} from "../Source/Items/ItemDB.js";
+import { containerLayout } from "../Source/Items/LootContainers.js";
+import { Game } from "../Source/Game.js";
 import * as THREE from "three";
 
 let passed = 0;
@@ -696,6 +703,69 @@ test("Player: stamina drains on sprint, gates sprint at zero, regens after delay
   assert.equal(p.health, 100);
 });
 
+test("Loot: rollLoot is seed-deterministic with valid ids and count ranges", () => {
+  for (const type of Object.keys(LOOT_TABLES)) {
+    const ids = new Set(LOOT_TABLES[type].map((e) => e.id));
+    for (let seed = 1; seed <= 40; seed++) {
+      const a = rollLoot(type, Mulberry(seed));
+      assert.deepEqual(a, rollLoot(type, Mulberry(seed)));
+      assert.ok(a.length <= 3);
+      for (const it of a) {
+        assert.ok(ids.has(it.id), `unknown id ${it.id}`);
+        const e = LOOT_TABLES[type].find((x) => x.id === it.id);
+        if (e.n) assert.ok(it.n >= e.n[0] && it.n <= e.n[1], `n ${it.n}`);
+        else assert.equal(it.n, 1);
+      }
+    }
+  }
+  // junk entries (id null) never surface
+  for (let s = 0; s < 60; s++)
+    for (const it of rollLoot("barrel", Mulberry(s))) assert.ok(it.id);
+});
+
+test("Loot: nearestSearchable gates on reach, facing, and searched", () => {
+  const mk = (x, z, searched = false) => ({ x, z, searched });
+  const ahead = mk(2, 0);
+  const far = mk(5, 0);
+  const behind = mk(-2, 0);
+  const done = mk(1.5, 0, true);
+  assert.equal(nearestSearchable([far, behind, done], 0, 0, 1, 0), null);
+  assert.equal(
+    nearestSearchable([ahead, far, behind, done], 0, 0, 1, 0),
+    ahead,
+  );
+  // standing on top bypasses the facing gate
+  const onTop = mk(0.2, 0);
+  assert.equal(nearestSearchable([onTop], 0, 0, -1, 0), onTop);
+});
+
+test("Loot: containerLayout covers sites, one bonus pistol, clear of walls", () => {
+  for (let seed = 1; seed <= 8; seed++) {
+    const hf = makeHeightfield(seed);
+    const layout = buildingLayout(hf);
+    const list = containerLayout(layout.structures, layout.props.barrels);
+    assert.ok(list.length >= 6, `seed ${seed}: only ${list.length}`);
+    assert.equal(list.filter((c) => c.bonus === "pistol").length, 1);
+    assert.equal(
+      list.filter((c) => c.type === "barrel").length,
+      layout.props.barrels.length,
+    );
+    // crates/cabinets never sit inside a tall collider (walls, chimneys)
+    for (const c of list) {
+      if (c.type === "barrel") continue;
+      const stuck = layout.colliders.some(
+        (b) =>
+          b.maxY - b.minY > 1.5 &&
+          c.x > b.minX &&
+          c.x < b.maxX &&
+          c.z > b.minZ &&
+          c.z < b.maxZ,
+      );
+      assert.ok(!stuck, `seed ${seed}: ${c.type} inside a wall`);
+    }
+  }
+});
+
 test("Player: takeDamage clamps at zero and sets dead exactly once", () => {
   const input = { consumeLook: () => [0, 0], down: () => false };
   const camera = { position: new THREE.Vector3(), rotation: { set() {} } };
@@ -714,6 +784,25 @@ test("Player: takeDamage clamps at zero and sets dead exactly once", () => {
   assert.equal(p.dead, true);
   p.takeDamage(ATTACK_DMG); // no-op once dead
   assert.equal(p.health, 0);
+});
+
+test("Game: best score persists only on improvement", () => {
+  const store = {};
+  globalThis.localStorage = {
+    getItem: (k) => store[k] ?? null,
+    setItem: (k, v) => (store[k] = String(v)),
+  };
+  const g = Object.create(Game.prototype);
+  store["hordenight.best"] = "3";
+  g.nightsSurvived = 2;
+  g.saveBest();
+  assert.equal(store["hordenight.best"], "3"); // no downgrade
+  g.nightsSurvived = 5;
+  g.saveBest();
+  assert.equal(store["hordenight.best"], "5");
+  assert.equal(g.best, 5);
+  delete globalThis.localStorage;
+  assert.equal(g.best, 0); // storage blocked -> harmless zero
 });
 
 console.log(`\n${passed} tests passed`);

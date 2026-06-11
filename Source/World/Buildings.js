@@ -382,5 +382,7 @@ export function createBuildings(hf) {
     colliders: layout.colliders,
     circles: layout.circles,
     interiors: layout.interiors,
+    structures: layout.structures,
+    props: layout.props,
   };
 }

@@ -118,6 +118,181 @@
       #HitMarker.Head {
         color: #ffd34d;
       }
+      #Prompt {
+        position: fixed;
+        left: 50%;
+        top: 58%;
+        transform: translateX(-50%);
+        z-index: 5;
+        pointer-events: none;
+        text-align: center;
+        display: none;
+        color: #e8e4d8;
+        font-size: 14px;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+      }
+      #PromptBar {
+        width: 160px;
+        height: 5px;
+        margin: 6px auto 0;
+        background: rgba(10, 12, 16, 0.6);
+        border: 1px solid rgba(232, 228, 216, 0.3);
+      }
+      #PromptFill {
+        height: 100%;
+        width: 0;
+        background: #d8cfa8;
+      }
+      #Toast {
+        position: fixed;
+        left: 50%;
+        bottom: 96px;
+        transform: translateX(-50%);
+        z-index: 5;
+        pointer-events: none;
+        color: #ffe9b8;
+        font-size: 15px;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+      #Toast.Show {
+        opacity: 1;
+      }
+      #Hotbar {
+        position: fixed;
+        left: 50%;
+        bottom: 56px;
+        transform: translateX(-50%);
+        z-index: 5;
+        pointer-events: none;
+        display: flex;
+        gap: 6px;
+        font: 12px monospace;
+      }
+      #Hotbar .Slot {
+        padding: 4px 9px;
+        background: rgba(10, 12, 16, 0.55);
+        border: 1px solid rgba(232, 228, 216, 0.25);
+        border-radius: 3px;
+        color: #cfc9b8;
+      }
+      #Hotbar .Slot.Active {
+        border-color: #e8e4d8;
+        color: #fff;
+        background: rgba(40, 44, 52, 0.7);
+      }
+      #Hotbar .Slot.Locked {
+        opacity: 0.32;
+      }
+      #Ammo {
+        position: fixed;
+        right: 16px;
+        bottom: 22px;
+        z-index: 5;
+        pointer-events: none;
+        text-align: right;
+        font-family: monospace;
+        color: #e8e4d8;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+      }
+      #AmmoCount {
+        display: block;
+        font-size: 24px;
+      }
+      #HealCount {
+        display: block;
+        font-size: 13px;
+        color: #b8cfa8;
+      }
+      #InvPanel {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 9;
+        min-width: 280px;
+        background: rgba(8, 10, 14, 0.88);
+        border: 1px solid rgba(232, 228, 216, 0.3);
+        padding: 14px 22px;
+        color: #e8e4d8;
+        font-size: 14px;
+      }
+      #InvPanel h3 {
+        margin: 0 0 8px;
+        letter-spacing: 2px;
+        font-size: 13px;
+        text-transform: uppercase;
+        color: #c89a8a;
+      }
+      #InvPanel ul {
+        margin: 0;
+        padding-left: 18px;
+        line-height: 1.8;
+      }
+      #InvPanel.Off {
+        display: none;
+      }
+      #LowHealth {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 7;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(120, 6, 6, 0) 50%,
+          rgba(120, 6, 6, 0.65) 100%
+        );
+      }
+      #DeathScreen {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: rgba(18, 2, 2, 0.82);
+        color: #e8e4d8;
+        text-align: center;
+      }
+      #DeathScreen h1 {
+        margin: 0 0 6px;
+        font-size: 46px;
+        letter-spacing: 8px;
+        color: #c4503e;
+        text-shadow: 0 2px 18px rgba(180, 30, 20, 0.5);
+      }
+      #DeathScreen p {
+        margin: 0;
+        font-size: 17px;
+      }
+      #DeathBest {
+        opacity: 0.7;
+        font-size: 14px;
+      }
+      #RestartBtn {
+        margin-top: 18px;
+        padding: 10px 34px;
+        font:
+          15px system-ui,
+          sans-serif;
+        letter-spacing: 2px;
+        background: rgba(196, 80, 62, 0.15);
+        color: #e8e4d8;
+        border: 1px solid #c4503e;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      #RestartBtn:hover {
+        background: rgba(196, 80, 62, 0.35);
+      }
+      #DeathScreen.Off {
+        display: none;
+      }
       #DamageFlash {
         position: fixed;
         inset: 0;
@@ -172,6 +347,21 @@
     </div>
     <div id="Crosshair"></div>
     <div id="HitMarker">&#10005;</div>
+    <div id="Prompt">
+      <span id="PromptText"></span>
+      <div id="PromptBar"><div id="PromptFill"></div></div>
+    </div>
+    <div id="Toast"></div>
+    <div id="Hotbar"></div>
+    <div id="Ammo"></div>
+    <div id="InvPanel" class="Off"></div>
+    <div id="LowHealth"></div>
+    <div id="DeathScreen" class="Off">
+      <h1>YOU DIED</h1>
+      <p id="DeathNights"></p>
+      <p id="DeathBest"></p>
+      <button id="RestartBtn">RESTART</button>
+    </div>
     <div id="Clock">
       <span id="ClockTime">07:00</span><span id="ClockNight"></span>
     </div>
