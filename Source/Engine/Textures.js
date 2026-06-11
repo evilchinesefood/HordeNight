@@ -43,6 +43,61 @@ export function fluffyTuftTexture() {
   return tex;
 }
 
+// leaf cluster card for tree canopies (mips off upstream: alpha-test foliage
+// washes out when mipped)
+export function leafClusterTexture(seed = 11, pine = false) {
+  const S = 256;
+  const rng = Mulberry(seed);
+  const [c, ctx] = canvas(S);
+  ctx.clearRect(0, 0, S, S);
+  const C = S / 2;
+  if (pine) {
+    ctx.lineCap = "round";
+    for (let i = 0; i < 240; i++) {
+      const a = rng() * Math.PI * 2;
+      const d = Math.sqrt(rng()) * S * 0.44;
+      const x = C + Math.cos(a) * d;
+      const y = C + Math.sin(a) * d;
+      const len = 9 + rng() * 16;
+      const dir = a + (rng() - 0.5) * 1.2;
+      const g = 95 + rng() * 65;
+      ctx.strokeStyle = `rgb(${g * 0.45},${g},${g * 0.5})`;
+      ctx.lineWidth = 2 + rng() * 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(dir) * len, y + Math.sin(dir) * len);
+      ctx.stroke();
+    }
+  } else {
+    for (let i = 0; i < 260; i++) {
+      const a = rng() * Math.PI * 2;
+      const d =
+        Math.sqrt(rng()) * S * 0.45 * (0.78 + 0.22 * Math.sin(a * 3 + seed));
+      const x = C + Math.cos(a) * d;
+      const y = C + Math.sin(a) * d * 0.94;
+      const r = 5 + rng() * 9;
+      const g = 100 + rng() * 80;
+      ctx.fillStyle = `rgb(${g * 0.55},${g},${g * 0.4})`;
+      ctx.beginPath();
+      ctx.ellipse(
+        x,
+        y,
+        r,
+        r * (0.55 + rng() * 0.4),
+        rng() * Math.PI,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
+  return tex;
+}
+
 // wobbly bright cells on black; two scrolling reads min()ed = caustics
 export function causticTexture(seed = 17) {
   const S = 256;

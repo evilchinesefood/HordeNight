@@ -4,7 +4,7 @@ import { Sky } from "three/addons/objects/Sky.js";
 const SUN_ELEVATION = 14; // low sun -> long shadows
 const SUN_AZIMUTH = 205;
 const SHADOW_SPAN = 48;
-const SHADOW_RES = 2048;
+const SHADOW_RES = 1536;
 
 export function createSky(scene) {
   const sky = new Sky();

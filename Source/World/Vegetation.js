@@ -3,15 +3,19 @@ import { Tree } from "@dgreenheck/ez-tree";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { HALF, WATER_Y } from "../Core/Heightfield.js";
 import { Mulberry } from "../Core/Rng.js";
-import { fluffyTuftTexture, softNoiseTexture } from "../Engine/Textures.js";
+import {
+  fluffyTuftTexture,
+  softNoiseTexture,
+  leafClusterTexture,
+} from "../Engine/Textures.js";
 
 const TREE_TRIES = 2600;
 const TREE_CELL = 7;
-const TREE_CAP = 550;
+const TREE_CAP = 460;
 const CHUNKS = 4; // NxN world grid per variant so camera + shadow frustums can cull
 const SHRUB_COUNT = 280;
 const GRASS_TILE = 64;
-const GRASS_COUNT = 16000;
+const GRASS_COUNT = 11000;
 
 // ez-tree presets, detail-reduced to an instancing budget (~4-5k tris/tree)
 const PINE_SPECS = [
@@ -111,7 +115,7 @@ export function createVegetation(hf, heightTex) {
     };
   };
 
-  const addTreeVariant = (spec, items, heightOf) => {
+  const addTreeVariant = (spec, items, heightOf, isPine) => {
     if (!items.length) return;
     const variant = buildVariant(spec);
     const barkMat = new THREE.MeshStandardMaterial({
@@ -121,9 +125,8 @@ export function createVegetation(hf, heightTex) {
       roughness: 1,
     });
     const leafMat = new THREE.MeshStandardMaterial({
-      map: variant.leafSrcMat.map,
-      color: variant.leafSrcMat.color,
-      alphaTest: 0.4,
+      map: leafClusterTexture(spec.seed, isPine),
+      alphaTest: 0.35,
       side: THREE.DoubleSide,
       roughness: 1,
     });
@@ -132,7 +135,7 @@ export function createVegetation(hf, heightTex) {
     const leafDepth = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
       map: leafMat.map,
-      alphaTest: 0.4,
+      alphaTest: 0.35,
     });
 
     // bucket instances into world-grid chunks so frustum culling works
@@ -190,6 +193,7 @@ export function createVegetation(hf, heightTex) {
       spec,
       pines.filter((_, i) => i % 3 === k),
       (s) => 6.5 + s * 4,
+      true,
     ),
   );
   OAK_SPECS.forEach((spec, k) =>
@@ -197,6 +201,7 @@ export function createVegetation(hf, heightTex) {
       spec,
       oaks.filter((_, i) => i % 3 === k),
       (s) => 5 + s * 3,
+      false,
     ),
   );
 
@@ -243,7 +248,7 @@ export function createVegetation(hf, heightTex) {
         vec2 gUv = ( ( gWp + ${HALF}.0 ) / ${HALF * 2}.0 * 384.0 + 0.5 ) / 385.0;
         vec4 gHs = texture2D( uHeightTex, gUv );
         float gDist = distance( gWp, uCamPos.xz );
-        float gFade = ( 1.0 - smoothstep( 16.0, 28.0, gDist ) ) * smoothstep( 0.3, 0.55, gHs.g );
+        float gFade = ( 1.0 - smoothstep( 14.0, 25.0, gDist ) ) * smoothstep( 0.3, 0.55, gHs.g );
         gFade *= 1.0 - step( 198.0, max( abs( gWp.x ), abs( gWp.y ) ) );
         transformed = gRs * transformed * gFade;
         float gBend = uv.y * uv.y * gFade;

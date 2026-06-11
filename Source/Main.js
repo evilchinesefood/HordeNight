@@ -46,7 +46,9 @@ scene.add(buildings.group);
 const clutter = createClutter(hf);
 scene.add(clutter.group);
 
-const postFx = createPostFx(renderer, scene, camera);
+const postFx = createPostFx(renderer, scene, camera, {
+  ao: !location.search.includes("noao"),
+});
 const input = new Input(renderer.domElement);
 const audio = new AudioAmbience();
 

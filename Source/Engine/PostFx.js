@@ -7,7 +7,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { VignetteShader } from "three/addons/shaders/VignetteShader.js";
 
-export function createPostFx(renderer, scene, camera) {
+export function createPostFx(renderer, scene, camera, { ao = true } = {}) {
   const pr = renderer.getPixelRatio();
   const size = renderer.getSize(new THREE.Vector2()).multiplyScalar(pr);
 
@@ -19,20 +19,22 @@ export function createPostFx(renderer, scene, camera) {
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
 
-  // half-res AO: halves the fill AND the two extra scene passes it renders
-  const gtao = new GTAOPass(scene, camera, size.x / 2, size.y / 2);
-  const gtaoSetSize = gtao.setSize.bind(gtao);
-  gtao.setSize = (w, h) => gtaoSetSize(w / 2, h / 2);
-  gtao.blendIntensity = 0.85;
-  gtao.updateGtaoMaterial({
-    radius: 0.5,
-    distanceExponent: 1.5,
-    thickness: 1,
-    scale: 1.5,
-    samples: 12,
-    distanceFallOff: 1,
-  });
-  composer.addPass(gtao);
+  if (ao) {
+    // half-res AO: halves the fill AND the two extra scene passes it renders
+    const gtao = new GTAOPass(scene, camera, size.x / 2, size.y / 2);
+    const gtaoSetSize = gtao.setSize.bind(gtao);
+    gtao.setSize = (w, h) => gtaoSetSize(w / 2, h / 2);
+    gtao.blendIntensity = 0.85;
+    gtao.updateGtaoMaterial({
+      radius: 0.5,
+      distanceExponent: 1.5,
+      thickness: 1,
+      scale: 1.5,
+      samples: 12,
+      distanceFallOff: 1,
+    });
+    composer.addPass(gtao);
+  }
 
   const bloom = new UnrealBloomPass(size, 0.13, 0.25, 1.2);
   composer.addPass(bloom);
