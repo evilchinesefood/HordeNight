@@ -35,7 +35,16 @@ export class Player {
     this.stride = 0;
     this.bobPhase = 0;
     this.landDip = 0;
+    this.maxHealth = 100;
+    this.health = this.maxHealth;
+    this.dead = false;
     this.update(0);
+  }
+
+  takeDamage(d) {
+    if (this.dead) return;
+    this.health = Math.max(0, this.health - d);
+    if (this.health === 0) this.dead = true;
   }
 
   update(dt) {

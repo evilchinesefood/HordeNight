@@ -20,6 +20,17 @@ import {
   findSpawn,
 } from "../Source/Core/Placement.js";
 import { fillTerrain, makeGridSampler } from "../Source/World/TerrainFill.js";
+import { makeGrid } from "../Source/Engine/SpatialGrid.js";
+import { seek, whiskerAvoid, separation } from "../Source/Entity/Steering.js";
+import { tick, pickSpawnPoint } from "../Source/Entity/Spawner.js";
+import {
+  makeZombie,
+  step,
+  Z_RADIUS,
+  ATTACK_RANGE,
+  ATTACK_DMG,
+  ATTACK_COOLDOWN,
+} from "../Source/Entity/Zombie.js";
 import * as THREE from "three";
 
 let passed = 0;
@@ -326,6 +337,162 @@ test("Player: WASD moves along camera axes at any yaw", () => {
     assert.ok(dot(run(yaw, "KeyD"), right) > 0.99, `D not right at ${yaw}`);
     assert.ok(dot(run(yaw, "KeyA"), right) < -0.99, `A not left at ${yaw}`);
   }
+});
+
+test("SpatialGrid: extent inserts land in every touched cell, queries dedup", () => {
+  const g = makeGrid(8);
+  const wall = { id: "wall" };
+  const rock = { id: "rock" };
+  g.insert(wall, -10, -10, 10, 10);
+  g.insert(rock, 30, 30);
+  const near = g.queryRadius(0, 0, 5);
+  assert.deepEqual(near, [wall]); // present once despite spanning many cells
+  assert.ok(g.queryRadius(9, 9, 3).includes(wall));
+  assert.ok(g.queryRadius(30, 28, 4).includes(rock));
+  assert.deepEqual(g.queryRadius(100, 100, 5), []);
+});
+
+test("Steering: seek points at the target scaled to speed", () => {
+  const v = seek(0, 0, 3, 4, 2.5);
+  assert.ok(Math.abs(v.x - 1.5) < 1e-9 && Math.abs(v.z - 2) < 1e-9);
+  assert.deepEqual(seek(1, 1, 1, 1, 5), { x: 0, z: 0 });
+});
+
+test("Steering: whiskers deflect sideways around a box ahead, silent when clear", () => {
+  const box = { minX: 1, maxX: 3, minZ: -1, maxZ: 1 };
+  const d = whiskerAvoid(0, 0, 1, 0, [box]);
+  assert.ok(Math.hypot(d.x, d.z) > 0.5, "no deflection in front of a wall");
+  assert.ok(Math.abs(d.z) > Math.abs(d.x), "deflection is not sideways");
+  const clear = whiskerAvoid(0, 0, -1, 0, [box]);
+  assert.deepEqual(clear, { x: 0, z: 0 });
+  const circle = { x: 2, z: 0, r: 0.5 };
+  assert.ok(Math.hypot(whiskerAvoid(0, 0, 1, 0, [circle]).z) > 0);
+});
+
+test("Steering: separation pushes apart, fades with distance, skips self", () => {
+  const close = separation(0, 0, [{ x: 0.4, z: 0 }], 1.1);
+  assert.ok(close.x < 0 && close.z === 0);
+  const far = separation(0, 0, [{ x: 0.9, z: 0 }], 1.1);
+  assert.ok(far.x < 0 && Math.abs(far.x) < Math.abs(close.x));
+  assert.deepEqual(separation(0, 0, [{ x: 0, z: 0 }], 1.1), { x: 0, z: 0 });
+  assert.deepEqual(separation(0, 0, [{ x: 5, z: 0 }], 1.1), { x: 0, z: 0 });
+});
+
+test("Spawner: cadence accumulates, cap clamps, no burst banking", () => {
+  let s = tick({ active: 0, cap: 4, accum: 0, dt: 0.5, rate: 1 });
+  assert.equal(s.spawns, 0);
+  assert.ok(Math.abs(s.accum - 0.5) < 1e-9);
+  s = tick({ active: 0, cap: 4, accum: s.accum, dt: 0.6, rate: 1 });
+  assert.equal(s.spawns, 1);
+  assert.ok(s.accum < 1);
+  // long stretch at cap must not bank a burst for when a slot frees
+  s = tick({ active: 4, cap: 4, accum: 0, dt: 30, rate: 1 });
+  assert.equal(s.spawns, 0);
+  assert.ok(s.accum <= 1);
+  // a big dt below cap clamps to free slots and drops the excess
+  s = tick({ active: 2, cap: 4, accum: 0, dt: 10, rate: 1 });
+  assert.equal(s.spawns, 2);
+  assert.ok(s.accum <= 1);
+});
+
+test("Spawner: pickSpawnPoint stays in the radius band, out of view, clear", () => {
+  const rng = Mulberry(5);
+  for (let i = 0; i < 50; i++) {
+    const facing = rng() * Math.PI * 2;
+    const p = pickSpawnPoint(10, -5, facing, rng, () => true);
+    const dx = p.x - 10;
+    const dz = p.z - -5;
+    const d = Math.hypot(dx, dz);
+    assert.ok(d > 28 - 1e-9 && d < 45 + 1e-9, `radius ${d}`);
+    // candidate never lands in the forward 120-degree cone
+    const dot = (dx / d) * Math.cos(facing) + (dz / d) * Math.sin(facing);
+    assert.ok(dot <= 0.5 + 1e-9, `in view cone: dot ${dot}`);
+  }
+  assert.equal(
+    pickSpawnPoint(0, 0, 0, Mulberry(5), () => false),
+    null,
+  );
+  // clearance is honored: only a specific far spot passes
+  const picky = pickSpawnPoint(
+    0,
+    0,
+    0,
+    Mulberry(11),
+    (x) => x < -30, // only points well behind (facing 0 = +x)
+  );
+  assert.ok(picky === null || picky.x < -30);
+});
+
+test("Zombie: chase closes distance, then stops and attacks in range", () => {
+  const z = makeZombie(12, 0, 0.4);
+  const d0 = Math.hypot(z.x, z.z);
+  let hits = 0;
+  let firstHitAt = -1;
+  for (let i = 0; i < 600; i++) {
+    step(z, 0, 0, [], [z], 1 / 60);
+    if (z.attacked) {
+      hits++;
+      if (firstHitAt < 0) firstHitAt = i;
+    }
+  }
+  const d1 = Math.hypot(z.x, z.z);
+  assert.ok(d1 < ATTACK_RANGE + 0.3, `never reached the player: ${d1}`);
+  assert.ok(d1 < d0 - 9, "did not close distance");
+  assert.equal(z.state, "ATTACK");
+  assert.ok(hits >= 4 && hits <= 8, `hit cadence off: ${hits} in 10s`);
+  // wind-up: no hit before the initial cooldown elapsed
+  assert.ok(firstHitAt >= Math.floor(0.4 * 60) - 1);
+});
+
+test("Zombie: attack cooldown spaces hits ~1s apart", () => {
+  const z = makeZombie(0.8, 0, 0.1);
+  const frames = [];
+  for (let i = 0; i < 300; i++) {
+    step(z, 0, 0, [], [z], 1 / 60);
+    if (z.attacked) frames.push(i);
+  }
+  assert.ok(frames.length >= 2);
+  for (let i = 1; i < frames.length; i++) {
+    const gap = (frames[i] - frames[i - 1]) / 60;
+    assert.ok(Math.abs(gap - ATTACK_COOLDOWN) < 0.05, `gap ${gap}`);
+  }
+});
+
+test("Zombie: slides around a wall without ever clipping it", () => {
+  // 4m wall between zombie and player
+  const wall = { minX: -0.2, maxX: 0.2, minZ: -2, maxZ: 2, minY: 0, maxY: 2.5 };
+  const z = makeZombie(3, 0.3, 0.5);
+  const d0 = Math.hypot(z.x + 3, z.z);
+  for (let i = 0; i < 900; i++) {
+    step(z, -3, 0, [wall], [z], 1 / 60);
+    const inX =
+      z.x > wall.minX - Z_RADIUS + 0.01 && z.x < wall.maxX + Z_RADIUS - 0.01;
+    const inZ =
+      z.z > wall.minZ - Z_RADIUS + 0.01 && z.z < wall.maxZ + Z_RADIUS - 0.01;
+    assert.ok(!(inX && inZ), `clipped the wall at frame ${i}: ${z.x},${z.z}`);
+  }
+  const d1 = Math.hypot(z.x + 3, z.z);
+  assert.ok(d1 < d0 - 1.5, `made no progress around the wall: ${d1}`);
+});
+
+test("Player: takeDamage clamps at zero and sets dead exactly once", () => {
+  const input = { consumeLook: () => [0, 0], down: () => false };
+  const camera = { position: new THREE.Vector3(), rotation: { set() {} } };
+  const p = new Player(camera, input, { heightAt: () => 0 }, [], [], {
+    x: 0,
+    z: 0,
+    yaw: 0,
+  });
+  assert.equal(p.health, 100);
+  assert.equal(p.dead, false);
+  for (let i = 0; i < 9; i++) p.takeDamage(ATTACK_DMG);
+  assert.equal(p.health, 10);
+  assert.equal(p.dead, false);
+  p.takeDamage(ATTACK_DMG * 5); // overkill clamps
+  assert.equal(p.health, 0);
+  assert.equal(p.dead, true);
+  p.takeDamage(ATTACK_DMG); // no-op once dead
+  assert.equal(p.health, 0);
 });
 
 console.log(`\n${passed} tests passed`);

@@ -442,17 +442,24 @@ export function clutterLayout(hf, buildingBoxes = []) {
 
 // --- spawn ---
 
+// shared clearance predicate: dry ground, clear of world circles (pad on top
+// of each radius) and building AABBs (boxPad). Player spawn and the zombie
+// spawner both validate points through this.
+export const isClearAt = (hf, circles, boxes, x, z, pad, boxPad = pad) =>
+  hf.heightAt(x, z) > 0.5 &&
+  !circles.some((c) => (c.x - x) ** 2 + (c.z - z) ** 2 < (c.r + pad) ** 2) &&
+  !boxes.some(
+    (b) =>
+      x > b.minX - boxPad &&
+      x < b.maxX + boxPad &&
+      z > b.minZ - boxPad &&
+      z < b.maxZ + boxPad,
+  );
+
 export function findSpawn(hf, worldCircles, buildingBoxes) {
   const home = hf.sites[0] ?? { x: 0, z: 0 };
   const clear = (x, z) =>
-    hf.heightAt(x, z) > 0.5 &&
-    !worldCircles.some(
-      (c) => (c.x - x) ** 2 + (c.z - z) ** 2 < (c.r + 1.2) ** 2,
-    ) &&
-    !buildingBoxes.some(
-      (b) =>
-        x > b.minX - 1 && x < b.maxX + 1 && z > b.minZ - 1 && z < b.maxZ + 1,
-    );
+    isClearAt(hf, worldCircles, buildingBoxes, x, z, 1.2, 1);
   let sx = home.x + 10;
   let sz = home.z + 10;
   outer: for (let rad = 10; rad <= 26; rad += 4) {

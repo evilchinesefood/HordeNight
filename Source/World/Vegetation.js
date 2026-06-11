@@ -628,7 +628,6 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
   // the whole factory context (placement arrays, cell keys) for the session
   pines.length = 0;
   oaks.length = 0;
-  cells.clear();
   impData.pine.clear();
   impData.oak.clear();
 

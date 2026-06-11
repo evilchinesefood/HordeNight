@@ -50,6 +50,43 @@
       #Overlay.Hidden {
         display: none;
       }
+      #Hud {
+        position: fixed;
+        left: 50%;
+        bottom: 26px;
+        transform: translateX(-50%);
+        z-index: 5;
+        pointer-events: none;
+      }
+      #HealthBar {
+        width: 240px;
+        height: 13px;
+        background: rgba(10, 12, 16, 0.55);
+        border: 1px solid rgba(232, 228, 216, 0.35);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      #HealthFill {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(#c4503e, #8f2f22);
+        transition: width 0.15s ease;
+      }
+      #DamageFlash {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 8;
+        opacity: 0;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(150, 8, 8, 0) 55%,
+          rgba(150, 8, 8, 0.6) 100%
+        );
+      }
+      #DamageFlash.Death {
+        background: rgba(110, 0, 0, 0.92);
+      }
     </style>
   </head>
   <body>
@@ -61,6 +98,10 @@
       </p>
       <p class="Hint">Loading&hellip;</p>
     </div>
+    <div id="Hud">
+      <div id="HealthBar"><div id="HealthFill"></div></div>
+    </div>
+    <div id="DamageFlash"></div>
     <script>
       // module-load failure fallback; Main.js owns the hint once it boots
       window.addEventListener("error", function () {

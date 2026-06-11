@@ -13,6 +13,10 @@ import { Weather } from "./World/Weather.js";
 import { Player, DT_MAX } from "./Player/Player.js";
 import { setTextureAnisotropy } from "./Engine/Textures.js";
 import { findSpawn } from "./Core/Placement.js";
+import { Mulberry } from "./Core/Rng.js";
+import { Zombies } from "./Entity/Zombies.js";
+import { Game } from "./Game.js";
+import { Hud } from "./Hud.js";
 
 const SEED = 7;
 const QS = new URLSearchParams(location.search);
@@ -118,7 +122,45 @@ const weather = new Weather(
   sky.setOvercast,
 );
 
-// dev menu (?debug only): force day/night/rain; shows while paused/unlocked
+// spawn near the first cabin, facing the world center, on validated clear ground
+const worldCircles = [
+  ...veg.trunkColliders,
+  ...clutter.circles,
+  ...buildings.circles,
+];
+const spawn = findSpawn(hfp, worldCircles, buildings.colliders);
+const player = new Player(
+  camera,
+  input,
+  hf,
+  buildings.colliders,
+  worldCircles,
+  spawn,
+  {
+    onStep: (sprint) => audio.step(sprint),
+    onLand: (speed) => audio.land(speed),
+  },
+);
+
+const hud = new Hud();
+const zombies = new Zombies({
+  heightAt: terrain.gridHeightAt,
+  hf: hfp,
+  boxes: buildings.colliders,
+  circles: worldCircles,
+  rng: Mulberry(SEED * 7919 + 1), // own stream: world draws stay untouched
+});
+scene.add(zombies.group);
+const game = new Game(
+  { player, zombies, weather, water, terrain, veg, sky, audio, hf },
+  () => {
+    hud.flashDeath();
+    document.exitPointerLock?.();
+    setTimeout(() => location.reload(), 1100);
+  },
+);
+
+// dev menu (?debug only): force day/night/rain, spawn waves; shows while paused
 let devMenu = null;
 if (DEBUG) {
   devMenu = document.createElement("div");
@@ -157,28 +199,12 @@ if (DEBUG) {
     weather.force = weather.force === null ? 1 : weather.force === 1 ? 0 : null;
     b.textContent = rainLabel();
   });
+  devBtn("Spawn wave", () => zombies.spawnWave(player, 8));
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyG") zombies.spawnWave(player, 8);
+  });
   document.body.appendChild(devMenu);
 }
-
-// spawn near the first cabin, facing the world center, on validated clear ground
-const worldCircles = [
-  ...veg.trunkColliders,
-  ...clutter.circles,
-  ...buildings.circles,
-];
-const spawn = findSpawn(hfp, worldCircles, buildings.colliders);
-const player = new Player(
-  camera,
-  input,
-  hf,
-  buildings.colliders,
-  worldCircles,
-  spawn,
-  {
-    onStep: (sprint) => audio.step(sprint),
-    onLand: (speed) => audio.land(speed),
-  },
-);
 
 const overlay = document.getElementById("Overlay");
 // capability, not API presence: Android Chrome exposes requestPointerLock
@@ -278,6 +304,7 @@ const indoorNow = () =>
 let last = performance.now();
 let lastDraw = 0;
 let elapsed = 0;
+let lastHealth = player.health;
 renderer.setAnimationLoop(() => {
   const now = performance.now();
   // paused behind the translucent overlay: ~30fps is plenty (battery/thermal)
@@ -286,18 +313,16 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min((now - last) / 1000, DT_MAX);
   last = now;
   elapsed += dt;
-  if (input.locked) player.update(dt);
-  weather.update(dt, player.pos, indoorNow());
-  water.update(dt);
-  terrain.update(elapsed);
-  veg.update(elapsed, player.pos, weather.gust);
-  if (sky.update(player.pos, elapsed)) renderer.shadowMap.needsUpdate = true;
-  audio.update(
-    dt,
-    hf.streamDist(player.pos.x, player.pos.z),
-    weather.visMix,
-    weather.intensity,
-  );
+  const res = game.update(dt, elapsed, {
+    locked: input.locked,
+    indoor: indoorNow(),
+  });
+  if (res.shadowDirty) renderer.shadowMap.needsUpdate = true;
+  if (player.health !== lastHealth) {
+    if (player.health < lastHealth) hud.flashDamage();
+    hud.setHealth(player.health / player.maxHealth);
+    lastHealth = player.health;
+  }
   if (statsHud) {
     renderer.info.reset();
     statsHud.tick();
@@ -306,7 +331,19 @@ renderer.setAnimationLoop(() => {
 });
 
 // debug handle for automated smoke tests
-window.HN = { player, hf, scene, renderer, camera, veg, weather, sky };
+window.HN = {
+  player,
+  hf,
+  scene,
+  renderer,
+  camera,
+  veg,
+  weather,
+  sky,
+  zombies,
+  game,
+  hud,
+};
 const tp = QS.get("tp");
 if (tp) {
   const [x, z, yaw, pitch, up] = tp.split(",").map(Number);
