@@ -1,7 +1,8 @@
 import * as THREE from "three";
-import { WORLD_SIZE, WATER_Y } from "../Core/Heightfield.js";
+import { WORLD_SIZE, HALF, WATER_Y } from "../Core/Heightfield.js";
 import { Fbm2 } from "../Core/Noise.js";
 import { groundTextureSet, causticTexture } from "../Engine/Textures.js";
+import { buildSitePaths, pathDistance } from "../Core/SitePaths.js";
 
 const RES = 384;
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
@@ -54,48 +55,9 @@ export function createTerrain(hf, anisotropy = 4) {
   const tint = Fbm2(hf.seed + 55);
   const patches = Fbm2(hf.seed + 56);
 
-  // worn paths: connect each site to its nearest neighbor unless the
-  // segment would cross the stream
-  const paths = [];
-  const seen = new Set();
-  for (let i = 0; i < hf.sites.length; i++) {
-    let bj = -1;
-    let bd = 1e9;
-    for (let j = 0; j < hf.sites.length; j++) {
-      if (j === i) continue;
-      const d = Math.hypot(
-        hf.sites[i].x - hf.sites[j].x,
-        hf.sites[i].z - hf.sites[j].z,
-      );
-      if (d < bd) {
-        bd = d;
-        bj = j;
-      }
-    }
-    if (bj < 0 || bd > 110) continue;
-    const key = Math.min(i, bj) + ":" + Math.max(i, bj);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const a = hf.sites[i];
-    const b = hf.sites[bj];
-    let crosses = false;
-    for (let k = 1; k < 8; k++) {
-      const t = k / 8;
-      if (hf.streamDist(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t) < 12)
-        crosses = true;
-    }
-    if (!crosses) paths.push([a.x, a.z, b.x, b.z]);
-  }
-  const pathDist = (x, z) => {
-    let best = 1e9;
-    for (const [ax, az, bx, bz] of paths) {
-      const dx = bx - ax;
-      const dz = bz - az;
-      const t = clamp01(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz));
-      best = Math.min(best, Math.hypot(x - (ax + dx * t), z - (az + dz * t)));
-    }
-    return best;
-  };
+  const paths = buildSitePaths(hf.sites, hf.streamDist);
+  const pathDist = (x, z) => pathDistance(paths, x, z);
+
   const normal = geo.attributes.normal;
   const colors = new Float32Array(pos.count * 3);
   const splat = new Float32Array(pos.count * 3); // grass, dirt, rock
@@ -137,18 +99,19 @@ export function createTerrain(hf, anisotropy = 4) {
   geo.setAttribute("splat", new THREE.BufferAttribute(splat, 3));
 
   // R = terrain height, G = grass density; sampled by the near-field grass shader
+  // half-float: linear filtering of 32-bit floats needs a non-core extension
   const HT = RES + 1;
-  const hdata = new Float32Array(HT * HT * 4);
+  const hdata = new Uint16Array(HT * HT * 4);
   for (let i = 0; i < pos.count; i++) {
-    hdata[i * 4] = pos.getY(i);
-    hdata[i * 4 + 1] = splat[i * 3];
+    hdata[i * 4] = THREE.DataUtils.toHalfFloat(pos.getY(i));
+    hdata[i * 4 + 1] = THREE.DataUtils.toHalfFloat(splat[i * 3]);
   }
   const heightTex = new THREE.DataTexture(
     hdata,
     HT,
     HT,
     THREE.RGBAFormat,
-    THREE.FloatType,
+    THREE.HalfFloatType,
   );
   heightTex.minFilter = THREE.LinearFilter;
   heightTex.magFilter = THREE.LinearFilter;
@@ -207,6 +170,45 @@ export function createTerrain(hf, anisotropy = 4) {
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
+
+  // skirt: closes residual edge sightlines (e.g. the stream notch in the rim)
+  {
+    const N = 96;
+    const verts = [];
+    const idx = [];
+    const edges = [
+      (t) => [-HALF + t * WORLD_SIZE, -HALF],
+      (t) => [HALF, -HALF + t * WORLD_SIZE],
+      (t) => [HALF - t * WORLD_SIZE, HALF],
+      (t) => [-HALF, HALF - t * WORLD_SIZE],
+    ];
+    let base = 0;
+    for (const edge of edges) {
+      for (let i = 0; i <= N; i++) {
+        const [x, z] = edge(i / N);
+        verts.push(x, hf.heightAt(x, z) + 0.05, z, x, -25, z);
+        if (i > 0) {
+          const a = base + (i - 1) * 2;
+          idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+        }
+      }
+      base += (N + 1) * 2;
+    }
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    sg.setIndex(idx);
+    sg.computeVertexNormals();
+    const skirt = new THREE.Mesh(
+      sg,
+      new THREE.MeshStandardMaterial({
+        color: 0x453724,
+        roughness: 1,
+        side: THREE.DoubleSide,
+      }),
+    );
+    mesh.add(skirt);
+  }
+
   const update = (t) => {
     uTime.value = t;
   };

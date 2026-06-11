@@ -6,7 +6,9 @@ import {
   resolveCircleAabb,
   resolveCircleCircle,
   resolvePlayer,
+  standHeight,
 } from "../Source/Engine/Collision.js";
+import { buildSitePaths, pathDistance } from "../Source/Core/SitePaths.js";
 
 let passed = 0;
 const test = (name, fn) => {
@@ -107,6 +109,39 @@ test("Collision: resolvePlayer respects collider heights", () => {
   assert.ok(hit.x >= 1.5 - 1e-9);
   const above = resolvePlayer(1.2, 0, 0.5, 3.1, 4.8, boxes, []);
   assert.equal(above.x, 1.2);
+});
+
+test("Collision: step-band tops are stood on, not pushed", () => {
+  const boxes = [{ minX: -1, maxX: 1, minZ: -1, maxZ: 1, minY: 0, maxY: 1 }];
+  // feet just above the top (descending onto it): no lateral push
+  const r = resolvePlayer(0.9, 0, 0.45, 0.8, 2.5, boxes, []);
+  assert.equal(r.x, 0.9);
+  // standHeight reports the box top while feet are within the step band
+  assert.equal(standHeight(0.9, 0, 0.45, 1.05, boxes, []), 1);
+  // feet well below the top: still pushed laterally
+  const low = resolvePlayer(1.2, 0, 0.5, 0, 1.7, boxes, []);
+  assert.ok(low.x >= 1.5 - 1e-9);
+  // a top far above the step band is not standable
+  assert.equal(standHeight(0.9, 0, 0.45, 0.2, boxes, []), -Infinity);
+  // circles behave the same
+  const circles = [{ x: 0, z: 0, r: 0.4, topY: 1 }];
+  assert.equal(standHeight(0.3, 0, 0.45, 1.1, [], circles), 1);
+});
+
+test("SitePaths: deterministic, deduped, rejects stream crossings", () => {
+  const sites = [
+    { x: 0, z: 0 },
+    { x: 50, z: 0 },
+    { x: 220, z: 220 },
+  ];
+  const noStream = () => 999;
+  const p1 = buildSitePaths(sites, noStream);
+  assert.deepEqual(p1, buildSitePaths(sites, noStream));
+  assert.equal(p1.length, 1); // mutual pair deduped; isolated site dropped
+  const streamAt25 = (x) => Math.abs(x - 25);
+  assert.equal(buildSitePaths(sites, streamAt25).length, 0);
+  assert.ok(Math.abs(pathDistance(p1, 25, 10) - 10) < 1e-9);
+  assert.ok(Math.abs(pathDistance(p1, -20, 0) - 20) < 1e-9);
 });
 
 console.log(`\n${passed} tests passed`);

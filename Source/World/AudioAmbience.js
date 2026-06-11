@@ -9,7 +9,7 @@ function noiseBuffer(ctx, seconds, brown) {
       const white = Math.random() * 2 - 1;
       if (brown) {
         last = (last + 0.02 * white) / 1.02;
-        d[i] = last * 3.5;
+        d[i] = Math.max(-1, Math.min(1, last * 3.5));
       } else {
         d[i] = white;
       }
@@ -25,9 +25,18 @@ export class AudioAmbience {
   }
 
   start() {
-    if (this.started) return;
+    if (this.started) {
+      // recovery gesture: Safari parks contexts in suspended/interrupted
+      if (this.ctx && this.ctx.state !== "running") this.ctx.resume();
+      return;
+    }
+    let ctx;
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch {
+      return; // no audio support - play silent
+    }
     this.started = true;
-    const ctx = new AudioContext();
     this.ctx = ctx;
     this.master = ctx.createGain();
     this.master.gain.value = 0.55;
@@ -71,6 +80,7 @@ export class AudioAmbience {
     this.waterGain.gain.value = 0;
     water.connect(bp).connect(this.waterGain).connect(this.master);
     water.start();
+    if (ctx.state !== "running") ctx.resume();
   }
 
   thud(rate, freq, vol) {
@@ -129,8 +139,12 @@ export class AudioAmbience {
 
   update(dt, streamDistance) {
     if (!this.started) return;
-    const target = 0.4 * Math.max(0, 1 - streamDistance / 45) ** 2;
-    this.waterGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.4);
+    this.waterTimer = (this.waterTimer || 0) - dt;
+    if (this.waterTimer <= 0) {
+      this.waterTimer = 0.2;
+      const target = 0.4 * Math.max(0, 1 - streamDistance / 45) ** 2;
+      this.waterGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.4);
+    }
     this.birdTimer -= dt;
     if (this.birdTimer <= 0) {
       this.birdTimer = 3 + Math.random() * 8;

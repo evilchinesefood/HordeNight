@@ -31,6 +31,9 @@ export function makeHeightfield(seed = 7) {
     h *= 0.35 + 0.65 * smooth(clamp01(d / 55));
     const s = smooth(clamp01(1 - d / 10));
     if (s > 0) h = lerp(h, WATER_Y - 2.3, s);
+    // rim: ground rises toward the boundary so the mesh edge hides behind it
+    const edge = Math.max(Math.abs(x), Math.abs(z));
+    h += smooth(clamp01((edge - 168) / 30)) * 14 * (1 - s);
     return h;
   };
 

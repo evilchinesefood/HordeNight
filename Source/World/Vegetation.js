@@ -16,6 +16,7 @@ const TREE_CELL = 5;
 const TREE_CAP = 1500;
 const CHUNKS = 10; // NxN world grid per variant so camera + shadow frustums can cull
 const HANDOFF = 88; // chunk-center distance where full detail swaps to impostors
+const LOD_DIST = HANDOFF + 29; // + chunk half-diagonal margin (40m cells)
 const SHRUB_COUNT = 280;
 const GRASS_TILE = 64;
 const GRASS_COUNT = 11000;
@@ -42,6 +43,7 @@ function buildVariant(spec) {
   o.leaves.count = Math.min(o.leaves.count, 7);
   o.leaves.size *= 2.1;
   t.generate();
+  t.leavesMesh.material.dispose(); // replaced by procedural leaf textures
   t.branchesMesh.geometry.computeBoundingBox();
   // ez-tree double-billboard leaves share verts between opposing quads, so
   // computeVertexNormals averages to zero -> NaN lighting on real GPUs.
@@ -63,7 +65,6 @@ function buildVariant(spec) {
     branchGeo: t.branchesMesh.geometry,
     branchSrcMat: t.branchesMesh.material,
     leafGeo: t.leavesMesh.geometry,
-    leafSrcMat: t.leavesMesh.material,
     height: t.branchesMesh.geometry.boundingBox.max.y,
     baseRadius: o.branch.radius[0],
   };
@@ -90,7 +91,7 @@ export function createVegetation(hf, heightTex) {
     if (pines.length + oaks.length >= TREE_CAP) break;
     const x = (rng() * 2 - 1) * (HALF - 12);
     const z = (rng() * 2 - 1) * (HALF - 12);
-    const key = `${(x / TREE_CELL) | 0},${(z / TREE_CELL) | 0}`;
+    const key = `${Math.floor(x / TREE_CELL)},${Math.floor(z / TREE_CELL)}`;
     if (cells.has(key)) continue;
     const y = hf.heightAt(x, z);
     if (y < WATER_Y + 0.8) continue;
@@ -102,8 +103,8 @@ export function createVegetation(hf, heightTex) {
   }
 
   // canopy sway, instancing-safe (ez-tree's built-in wind drops instanceMatrix)
-  const leafSway = (mat, H) => {
-    mat.customProgramCacheKey = () => `hn-sway-${H.toFixed(1)}`;
+  const leafSway = (mat, H, seed) => {
+    mat.customProgramCacheKey = () => `hn-sway-${seed}-${H.toFixed(1)}`;
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uTime = uTime;
       sh.vertexShader = sh.vertexShader
@@ -132,13 +133,14 @@ export function createVegetation(hf, heightTex) {
       aoMap: variant.branchSrcMat.aoMap,
       roughness: 1,
     });
+    if (barkMat.aoMap) barkMat.aoMap.channel = 0; // ez-tree geometry has no uv1
     const leafMat = new THREE.MeshStandardMaterial({
       map: leafClusterTexture(spec.seed, isPine),
       alphaTest: 0.35,
       side: THREE.DoubleSide,
       roughness: 1,
     });
-    leafSway(leafMat, variant.height);
+    leafSway(leafMat, variant.height, spec.seed);
 
     const leafDepth = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
@@ -177,26 +179,30 @@ export function createVegetation(hf, heightTex) {
       );
       leaves.customDepthMaterial = leafDepth;
       bucket.forEach(([t, i], j) => {
+        // one stream, drawn once: full tree and impostor share these values
         const r = Mulberry(i * 7 + hf.seed + spec.seed);
         const targetH = heightOf(t.s);
         const sc = targetH / variant.height;
-        m.makeRotationY(r() * Math.PI * 2);
-        m.scale(v.set(sc, sc * (0.92 + r() * 0.16), sc));
+        const rot = r() * Math.PI * 2;
+        const ys = 0.92 + r() * 0.16;
+        const g = 0.95 + r() * 0.3;
+        const red = g * (0.95 + r() * 0.1);
+        m.makeRotationY(rot);
+        m.scale(v.set(sc, sc * ys, sc));
         m.setPosition(t.x, t.y - 0.1, t.z);
         branches.setMatrixAt(j, m);
         leaves.setMatrixAt(j, m);
-        const g = 0.95 + r() * 0.3;
-        leaves.setColorAt(j, col.setRGB(g * (0.95 + r() * 0.1), g, g * 0.9));
+        leaves.setColorAt(j, col.setRGB(red, g, g * 0.9));
         const store = impData[isPine ? "pine" : "oak"];
         if (!store.has(key)) store.set(key, []);
         store.get(key).push({
           x: t.x,
           y: t.y - 0.1,
           z: t.z,
-          ry: Mulberry(i * 7 + hf.seed + spec.seed)() * Math.PI * 2,
+          ry: rot,
           w: impW * sc,
-          h: impTop * sc,
-          tint: [g * (0.95 + r() * 0.1), g, g * 0.9],
+          h: impTop * sc * ys,
+          tint: [red, g, g * 0.9],
         });
         trunkColliders.push({
           x: t.x,
@@ -315,12 +321,13 @@ export function createVegetation(hf, heightTex) {
         `vec3 transformed = vec3( position );
         mat3 gRs = mat3( instanceMatrix );
         vec2 gTuft = vec2( instanceMatrix[3][0], instanceMatrix[3][2] );
-        vec2 gWp = gTuft + floor( ( uCamPos.xz - gTuft ) / ${GRASS_TILE}.0 + 0.5 ) * ${GRASS_TILE}.0;
+        vec2 gWp = gTuft + // NOTE: gWp.y is world Z (vec2 of xz)
+         floor( ( uCamPos.xz - gTuft ) / ${GRASS_TILE}.0 + 0.5 ) * ${GRASS_TILE}.0;
         vec2 gUv = ( ( gWp + ${HALF}.0 ) / ${HALF * 2}.0 * 384.0 + 0.5 ) / 385.0;
         vec4 gHs = texture2D( uHeightTex, gUv );
         float gDist = distance( gWp, uCamPos.xz );
         float gJit = texture2D( uNoise, gWp * 0.13 ).r - 0.5;
-        float gFade = ( 1.0 - smoothstep( 14.0, 25.0, gDist ) ) * smoothstep( 0.28, 0.6, gHs.g + gJit * 0.35 );
+        float gFade = ( 1.0 - smoothstep( 14.0, 25.0, gDist ) ) * smoothstep( 0.35, 0.62, gHs.g + gJit * 0.35 );
         gFade *= 1.0 - step( 198.0, max( abs( gWp.x ), abs( gWp.y ) ) );
         transformed = gRs * transformed * gFade;
         float gBend = uv.y * uv.y * gFade;
@@ -369,6 +376,7 @@ export function createVegetation(hf, heightTex) {
   }
   grass.frustumCulled = false;
   grass.receiveShadow = true;
+  grass.layers.set(2); // AO-excluded: override materials drop the wrap shader
   group.add(grass);
 
   // --- shrubs ---
@@ -405,18 +413,54 @@ export function createVegetation(hf, heightTex) {
   shrubs.receiveShadow = true;
   group.add(shrubs);
 
+  // LOD records grouped by unique chunk center: one distance test per chunk,
+  // +/-4m hysteresis, and skipped entirely until the player moves 2m
+  const lodGroups = new Map();
+  for (const c of fullChunks) {
+    const k = `${c.cx},${c.cz}`;
+    if (!lodGroups.has(k))
+      lodGroups.set(k, {
+        cx: c.cx,
+        cz: c.cz,
+        full: [],
+        imp: [],
+        on: undefined,
+      });
+    lodGroups.get(k).full.push(...c.meshes);
+  }
+  for (const c of impChunks) {
+    const k = `${c.cx},${c.cz}`;
+    if (!lodGroups.has(k))
+      lodGroups.set(k, {
+        cx: c.cx,
+        cz: c.cz,
+        full: [],
+        imp: [],
+        on: undefined,
+      });
+    lodGroups.get(k).imp.push(c.mesh);
+  }
+  let lodX = 1e9;
+  let lodZ = 1e9;
   const update = (t, camPos) => {
     uTime.value = t;
     if (!camPos) return;
     uCamPos.value.copy(camPos);
-    for (const c of fullChunks) {
-      const vis = Math.hypot(camPos.x - c.cx, camPos.z - c.cz) < HANDOFF + 36;
-      c.meshes[0].visible = vis;
-      c.meshes[1].visible = vis;
-    }
-    for (const c of impChunks) {
-      c.mesh.visible =
-        Math.hypot(camPos.x - c.cx, camPos.z - c.cz) >= HANDOFF + 36;
+    if ((camPos.x - lodX) ** 2 + (camPos.z - lodZ) ** 2 < 4) return;
+    lodX = camPos.x;
+    lodZ = camPos.z;
+    for (const g of lodGroups.values()) {
+      const d2 = (camPos.x - g.cx) ** 2 + (camPos.z - g.cz) ** 2;
+      const on =
+        g.on === undefined
+          ? d2 < LOD_DIST * LOD_DIST
+          : g.on
+            ? d2 < (LOD_DIST + 4) ** 2
+            : d2 < (LOD_DIST - 4) ** 2;
+      if (on === g.on) continue;
+      g.on = on;
+      for (const mesh of g.full) mesh.visible = on;
+      for (const mesh of g.imp) mesh.visible = !on;
     }
   };
   return { group, trunkColliders, update };

@@ -86,6 +86,7 @@ export function createWater(heightTex) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = WATER_Y;
   mesh.receiveShadow = true;
+  mesh.layers.set(2); // AO-excluded: transparent plane must not write AO depth
 
   const update = (dt) => {
     uTime.value += dt;

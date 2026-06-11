@@ -4,7 +4,9 @@ import { Mulberry } from "../Core/Rng.js";
 function canvas(size) {
   const c = document.createElement("canvas");
   c.width = c.height = size;
-  return [c, c.getContext("2d")];
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("2D canvas unavailable - cannot generate textures");
+  return [c, ctx];
 }
 
 // FluffyGrass-style tuft: fat tapered blades, grayscale shading in rgb,

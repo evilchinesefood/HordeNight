@@ -8,7 +8,7 @@ export class Input {
     this.onLockChange = null;
 
     document.addEventListener("keydown", (e) => {
-      if (e.code === "Space") e.preventDefault();
+      if (this.locked && e.code === "Space") e.preventDefault();
       this.keys.add(e.code);
     });
     document.addEventListener("keyup", (e) => this.keys.delete(e.code));
@@ -16,6 +16,12 @@ export class Input {
       if (!this.locked) return;
       this.lookX += e.movementX;
       this.lookY += e.movementY;
+    });
+    document.addEventListener("pointerlockerror", () => {
+      // Chrome rejects re-lock within ~1.5s of an Escape exit; retry once
+      if (!this.retryArmed) return;
+      this.retryArmed = false;
+      setTimeout(() => this.lock(), 1300);
     });
     document.addEventListener("pointerlockchange", () => {
       this.locked = document.pointerLockElement === this.dom;
@@ -25,7 +31,13 @@ export class Input {
   }
 
   lock() {
-    this.dom.requestPointerLock();
+    try {
+      this.retryArmed = true;
+      const p = this.dom.requestPointerLock();
+      if (p && p.catch) p.catch(() => {}); // pointerlockerror handles retry
+    } catch {
+      // pointer lock unsupported (touch devices)
+    }
   }
 
   consumeLook() {

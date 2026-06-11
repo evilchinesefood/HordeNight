@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BOUND } from "../Core/Heightfield.js";
-import { resolvePlayer } from "../Engine/Collision.js";
+import { resolvePlayer, standHeight } from "../Engine/Collision.js";
 
 const EYE = 1.7;
 const RADIUS = 0.45;
@@ -90,7 +90,17 @@ export class Player {
     this.pos.x = r.x;
     this.pos.z = r.z;
 
-    const ground = this.hf.heightAt(this.pos.x, this.pos.z);
+    const ground = Math.max(
+      this.hf.heightAt(this.pos.x, this.pos.z),
+      standHeight(
+        this.pos.x,
+        this.pos.z,
+        RADIUS,
+        this.pos.y,
+        this.boxes,
+        this.trunks,
+      ),
+    );
     if (this.pos.y <= ground) {
       if (!this.grounded && this.vel.y < -5) {
         this.landDip = Math.min(0.16, -this.vel.y * 0.014);

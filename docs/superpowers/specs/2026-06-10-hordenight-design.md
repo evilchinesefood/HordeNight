@@ -118,3 +118,16 @@ Crafting / workbenches · base building / barricades / wall repair · hunger / t
 - **Performance:** dense props + many zombies — rely on instancing, object pooling, frustum culling, and LOD/draw-distance fog. Validate early in Milestone 1.
 - **Asset sourcing:** confirm a consistent CC0 set (Quaternius + Kenney) that share a visual style before heavy world building.
 - **Movement feel:** custom kinematic controller is the risk point; `rapier` is the fallback if it feels bad.
+
+---
+
+## M1 As-Built Addendum (2026-06-10)
+
+Milestone 1 shipped as a **procedural rural valley**, not the urban tile grid in SS3/SS5:
+
+- **Setting:** seeded heightfield (rolling hills, carved stream) with hamlet sites (cabins, barn, ruin, watchtower, well), worn paths, fences/props. No `WorldGen` tile catalogue, no `AssetLoader`, no GLTF assets — geometry is generated (ez-tree for trees) and textures are canvas-procedural (exception: ez-tree bark JPEGs).
+- **Implications for M2+ planning:**
+  - Zombie navigation (SS3) cannot use "the tile occupancy grid" — it does not exist. Steering queries should run against the heightfield (`Core/Heightfield.js`) + the static collider set; a spatial grid over those colliders is the planned M3 substrate (see fixes.md deferred tasks).
+  - Spawn points: use clearings around `hf.sites` instead of tile lots.
+  - Loot containers: place at sites/props instead of per-building tiles.
+- **Day/night prerequisite:** lighting/fog is currently baked at module load; M2 must first introduce a mutable lighting state (fixes.md deferred task) before the cycle can drive sun/ambient/fog as SS3 requires.

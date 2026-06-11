@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { Mulberry } from "../Core/Rng.js";
 import {
   plankTextureSet,
@@ -8,6 +9,31 @@ import {
 } from "../Engine/Textures.js";
 
 const GRIME_H = 1.4; // ground-line dirt fades out by this height
+
+// collapse a structure's many small meshes into one mesh per material
+function mergeGroup(src) {
+  const byMat = new Map();
+  src.traverse((o) => {
+    if (!o.isMesh) return;
+    const geo = o.geometry.clone();
+    o.updateMatrix();
+    geo.applyMatrix4(o.matrix);
+    if (!geo.attributes.color) {
+      const n = geo.attributes.position.count;
+      geo.setAttribute(
+        "color",
+        new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3),
+      );
+    }
+    if (!byMat.has(o.material)) byMat.set(o.material, []);
+    byMat.get(o.material).push(geo);
+  });
+  const out = new THREE.Group();
+  for (const [mat, geos] of byMat) {
+    out.add(new THREE.Mesh(mergeGeometries(geos), mat));
+  }
+  return out;
+}
 
 function makeMats() {
   const std = (t, extra = {}) =>
@@ -49,7 +75,7 @@ function gableGeo(w, h, d) {
   geo.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
   const n = v.length / 3;
   const uv = new Float32Array(n * 2);
-  const col = new Float32Array(n * 3).fill(1);
+  const col = new Float32Array(n * 3).fill(1); // required: shared mats use vertexColors
   for (let i = 0; i < n; i++) {
     uv[i * 2] = (v[i * 3] + v[i * 3 + 1]) * 0.35;
     uv[i * 2 + 1] = v[i * 3 + 2] * 0.35;
@@ -208,6 +234,7 @@ function addProps(hf, group, circles, MAT) {
       let dir = a0 + Math.PI / 2 + (rng() - 0.5) * 0.6;
       const segs = 3 + ((rng() * 3) | 0);
       let prev = null;
+      let placedRun = 0;
       for (let k = 0; k <= segs; k++) {
         const py = hf.heightAt(px, pz);
         if (py < 0.5) break; // ran into the stream valley
@@ -226,9 +253,14 @@ function addProps(hf, group, circles, MAT) {
           }
         }
         prev = cur;
+        placedRun++;
         dir += (rng() - 0.5) * 0.5;
         px += Math.cos(dir) * 2.2;
         pz += Math.sin(dir) * 2.2;
+      }
+      if (placedRun === 1) {
+        posts.pop(); // a lone rail-less post looks broken
+        circles.pop();
       }
     }
     const nB = 1 + ((rng() * 3) | 0);
@@ -332,7 +364,7 @@ function addProps(hf, group, circles, MAT) {
     const a = Mulberry(hf.seed + 91)() * Math.PI * 2;
     const wx = w.x + Math.cos(a) * 6.5;
     const wz = w.z + Math.sin(a) * 6.5;
-    const wg = well(MAT);
+    const wg = mergeGroup(well(MAT));
     wg.position.set(wx, hf.heightAt(wx, wz) - 0.05, wz);
     group.add(wg);
     circles.push({ x: wx, z: wz, r: 1.15, topY: wg.position.y + 1 });
@@ -353,7 +385,8 @@ export function createBuildings(hf) {
   };
 
   hf.sites.forEach((site, i) => {
-    const { group: g, solids } = builders[site.type](hf.seed + i * 13);
+    const { group: raw, solids } = builders[site.type](hf.seed + i * 13);
+    const g = mergeGroup(raw);
     g.position.set(site.x, site.y - 0.06, site.z);
     g.rotation.y = site.rot;
     group.add(g);

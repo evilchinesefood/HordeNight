@@ -94,9 +94,9 @@ function createClouds(scene) {
   const items = [];
   for (let i = 0; i < CLOUD_COUNT; i++) {
     items.push({
-      x: (rng() * 2 - 1) * 750,
+      x: (rng() * 2 - 1) * 600,
       y: 140 + rng() * 110,
-      z: (rng() * 2 - 1) * 750,
+      z: (rng() * 2 - 1) * 600,
       w: 140 + rng() * 160,
       h: 45 + rng() * 40,
       speed: 2 + rng() * 2.5,
@@ -105,7 +105,7 @@ function createClouds(scene) {
   const m = new THREE.Matrix4();
   const update = (t) => {
     items.forEach((c, i) => {
-      const x = ((((c.x + t * c.speed + 750) % 1500) + 1500) % 1500) - 750;
+      const x = ((((c.x + t * c.speed + 600) % 1200) + 1200) % 1200) - 600;
       m.makeScale(c.w, c.h, 1);
       m.setPosition(x, c.y, c.z);
       clouds.setMatrixAt(i, m);
@@ -150,17 +150,25 @@ export function createSky(scene) {
   const updateClouds = createClouds(scene);
 
   const texel = (SHADOW_SPAN * 2) / SHADOW_RES;
+  let lastTx = null;
+  let lastTz = null;
   const update = (target, t = 0) => {
     // snap the shadow frustum to texels so edges don't shimmer while walking
     const tx = Math.round(target.x / texel) * texel;
     const tz = Math.round(target.z / texel) * texel;
-    sun.target.position.set(tx, 0, tz);
-    sun.position.set(
-      tx + SUN_DIR.x * 150,
-      SUN_DIR.y * 150,
-      tz + SUN_DIR.z * 150,
-    );
+    const moved = tx !== lastTx || tz !== lastTz;
+    if (moved) {
+      lastTx = tx;
+      lastTz = tz;
+      sun.target.position.set(tx, 0, tz);
+      sun.position.set(
+        tx + SUN_DIR.x * 150,
+        SUN_DIR.y * 150,
+        tz + SUN_DIR.z * 150,
+      );
+    }
     updateClouds(t);
+    return moved; // caller gates renderer.shadowMap.needsUpdate on this
   };
   update(new THREE.Vector3());
 
