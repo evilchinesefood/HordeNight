@@ -16,6 +16,33 @@ export function setTextureAnisotropy(n) {
   ANISO = n;
 }
 
+// alpha-boosted mip chain for alpha-tested foliage: plain mips average alpha
+// toward 0 and the alphaTest erodes distant cards; boosting alpha per level
+// preserves coverage while killing the unmipped shimmer + cache thrash
+function alphaMipTexture(c, boost = 1.3) {
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const levels = [c];
+  let src = c;
+  while (src.width > 1 || src.height > 1) {
+    const [mc, mctx] = canvas(
+      Math.max(1, src.width >> 1),
+      Math.max(1, src.height >> 1),
+    );
+    mctx.drawImage(src, 0, 0, mc.width, mc.height);
+    const img = mctx.getImageData(0, 0, mc.width, mc.height);
+    const d = img.data;
+    for (let i = 3; i < d.length; i += 4) d[i] = Math.min(255, d[i] * boost);
+    mctx.putImageData(img, 0, 0);
+    levels.push(mc);
+    src = mc;
+  }
+  tex.mipmaps = levels;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  return tex;
+}
+
 // FluffyGrass-style tuft: fat tapered blades, grayscale shading in rgb,
 // color comes from the base->tip ramp in the grass shader
 export function fluffyTuftTexture() {
@@ -112,11 +139,7 @@ export function leafClusterTexture(seed = 11, pine = false) {
       d[i + 2] = f[2];
     }
   ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.generateMipmaps = false;
-  tex.minFilter = THREE.LinearFilter;
-  return tex;
+  return alphaMipTexture(c);
 }
 
 // painted far-tree impostor card (drawn for >90m + fog, style-matched)
@@ -154,11 +177,7 @@ export function impostorCardTexture(seed = 3, pine = false) {
       ctx.fill();
     }
   }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.generateMipmaps = false;
-  tex.minFilter = THREE.LinearFilter;
-  return tex;
+  return alphaMipTexture(c);
 }
 
 // deterministic value-noise FBM for cloud alpha erosion

@@ -10,6 +10,16 @@ import {
 } from "../Source/Engine/Collision.js";
 import { buildSitePaths, pathDistance } from "../Source/Core/SitePaths.js";
 import { Player, RADIUS, SPRINT, DT_MAX } from "../Source/Player/Player.js";
+import {
+  worldAabb,
+  cabinParts,
+  treeParams,
+  placeTrees,
+  buildingLayout,
+  clutterLayout,
+  findSpawn,
+} from "../Source/Core/Placement.js";
+import { fillTerrain, makeGridSampler } from "../Source/World/TerrainFill.js";
 import * as THREE from "three";
 
 let passed = 0;
@@ -167,6 +177,131 @@ test("SitePaths: deterministic, deduped, rejects stream crossings", () => {
   assert.equal(buildSitePaths(sites, streamAt25).length, 0);
   assert.ok(Math.abs(pathDistance(p1, 25, 10) - 10) < 1e-9);
   assert.ok(Math.abs(pathDistance(p1, -20, 0) - 20) < 1e-9);
+});
+
+test("Placement: worldAabb matches the THREE transform used for meshes", () => {
+  const g = new THREE.Group();
+  const v = new THREE.Vector3();
+  const rng = Mulberry(31337);
+  for (let i = 0; i < 200; i++) {
+    const s = {
+      w: 0.2 + rng() * 8,
+      d: 0.2 + rng() * 8,
+      x: (rng() - 0.5) * 10,
+      z: (rng() - 0.5) * 10,
+      h: rng() * 5,
+      y0: rng() < 0.5 ? rng() * 2 : undefined,
+    };
+    const x = (rng() - 0.5) * 300;
+    const y = rng() * 20;
+    const z = (rng() - 0.5) * 300;
+    const rot = ((rng() * 4) | 0) * (Math.PI / 2);
+    g.position.set(x, y - 0.06, z);
+    g.rotation.y = rot;
+    g.updateMatrixWorld(true);
+    v.set(s.x, 0, s.z).applyMatrix4(g.matrixWorld);
+    const w = rot % Math.PI === 0 ? s.w : s.d;
+    const d = rot % Math.PI === 0 ? s.d : s.w;
+    const a = worldAabb(s, x, y, z, rot);
+    assert.ok(Math.abs(a.minX - (v.x - w / 2)) < 1e-9);
+    assert.ok(Math.abs(a.maxX - (v.x + w / 2)) < 1e-9);
+    assert.ok(Math.abs(a.minZ - (v.z - d / 2)) < 1e-9);
+    assert.ok(Math.abs(a.maxZ - (v.z + d / 2)) < 1e-9);
+    assert.equal(a.minY, y + (s.y0 ?? -1));
+    assert.equal(a.maxY, y + s.h);
+  }
+});
+
+test("Placement: cabin shell - doorway passes, lintel blocks, floor stands", () => {
+  const p = cabinParts(7);
+  const boxes = p.solids.map((s) => worldAabb(s, 0, 0, 0, 0));
+  const doorX = p.doorOff;
+  const doorZ = (p.D - 0.2) / 2; // doorway wall plane
+  // standing player passes through the doorway (head clears the lintel)
+  const thru = resolvePlayer(doorX, doorZ, 0.45, 0.2, 1.9, boxes, []);
+  assert.equal(thru.x, doorX);
+  assert.equal(thru.z, doorZ);
+  // a jumper's head enters the lintel band and is pushed out
+  const jump = resolvePlayer(doorX, doorZ, 0.45, 0.5, 2.2, boxes, []);
+  assert.ok(jump.z !== doorZ);
+  // floor is step-band standable inside
+  assert.equal(standHeight(0, 0, 0.45, 0.2, boxes, []), 0.12);
+  // hugging an outside wall must NOT hoist onto a phantom floor ledge
+  assert.equal(
+    standHeight(0, -(p.D / 2 + 0.46), 0.45, 0, boxes, []),
+    -Infinity,
+  );
+  // a solid wall still blocks
+  const mid = -(p.D / 2 - 0.05);
+  const blocked = resolvePlayer(0, mid, 0.45, 0.2, 1.9, boxes, []);
+  assert.ok(blocked.z !== mid);
+});
+
+test("Placement: treeParams is the single draw site (pinned values)", () => {
+  const a = treeParams(0, 7, 101);
+  const b = treeParams(0, 7, 101);
+  assert.deepEqual(a, b);
+  // pinned: an accidental extra/reordered rng draw inside shifts these
+  const r = Mulberry(0 * 7 + 7 + 101);
+  assert.equal(a.rot, r() * Math.PI * 2);
+  assert.equal(a.ys, 0.92 + r() * 0.16);
+  const g = 0.95 + r() * 0.3;
+  assert.equal(a.g, g);
+  assert.equal(a.red, g * (0.95 + r() * 0.1));
+  assert.ok(treeParams(1, 7, 101).rot !== a.rot);
+});
+
+test("TerrainFill: worker fill matches the THREE geometry computation", () => {
+  const RES = 48;
+  const geo = new THREE.PlaneGeometry(400, 400, RES, RES);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const n = pos.count;
+  const xs = new Float32Array(n);
+  const zs = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    xs[i] = pos.getX(i);
+    zs[i] = pos.getZ(i);
+  }
+  const index = new Uint32Array(geo.index.array);
+  const fill = fillTerrain(7, xs, zs, index);
+  const hf = makeHeightfield(7);
+  for (let i = 0; i < n; i++) pos.setY(i, hf.heightAt(xs[i], zs[i]));
+  geo.computeVertexNormals();
+  const nor = geo.attributes.normal;
+  let maxD = 0;
+  for (let i = 0; i < n; i++) {
+    maxD = Math.max(
+      maxD,
+      Math.abs(fill.heights[i] - pos.getY(i)),
+      Math.abs(fill.normals[i * 3] - nor.getX(i)),
+      Math.abs(fill.normals[i * 3 + 1] - nor.getY(i)),
+      Math.abs(fill.normals[i * 3 + 2] - nor.getZ(i)),
+    );
+  }
+  assert.ok(maxD < 1e-6, `terrain fill diverges from the mesh: ${maxD}`);
+  const grid = makeGridSampler(fill.heights, RES, 400);
+  assert.ok(Math.abs(grid(xs[100], zs[100]) - fill.heights[100]) < 1e-3);
+});
+
+test("Placement: spawn is validated clear across seeds 1-20", () => {
+  // analytic heights (browser uses the bilinear grid - same lattice values,
+  // centimeter-scale differences between vertices); trunk radius 0.7 is a
+  // conservative superset of any real trunk collider
+  for (let seed = 1; seed <= 20; seed++) {
+    const hf = makeHeightfield(seed);
+    const b = buildingLayout(hf);
+    const c = clutterLayout(hf, b.colliders);
+    const { pines, oaks } = placeTrees(Mulberry(hf.seed + 31), hf);
+    assert.ok(pines.length + oaks.length <= 1500);
+    const circles = [
+      ...b.circles,
+      ...c.circles,
+      ...[...pines, ...oaks].map((t) => ({ x: t.x, z: t.z, r: 0.7 })),
+    ];
+    const s = findSpawn(hf, circles, b.colliders);
+    assert.ok(s.clear, `seed ${seed}: spawn not validated clear`);
+  }
 });
 
 test("Player: WASD moves along camera axes at any yaw", () => {

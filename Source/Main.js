@@ -12,6 +12,7 @@ import { AudioAmbience } from "./World/AudioAmbience.js";
 import { Weather } from "./World/Weather.js";
 import { Player, DT_MAX } from "./Player/Player.js";
 import { setTextureAnisotropy } from "./Engine/Textures.js";
+import { findSpawn } from "./Core/Placement.js";
 
 const SEED = 7;
 const QS = new URLSearchParams(location.search);
@@ -69,20 +70,25 @@ await new Promise((r) => setTimeout(r)); // let the overlay paint before the hea
 
 const hf = makeHeightfield(SEED);
 const sky = createSky(scene);
-const terrain = createTerrain(
+// async: the heavy attribute fill runs in TerrainWorker while textures
+// generate here, and the overlay stays responsive during the await
+const terrain = await createTerrain(
   hf,
   Math.min(renderer.capabilities.getMaxAnisotropy(), 8),
 );
 scene.add(terrain.mesh);
+// placement reads the mesh's own lattice so objects seat on the rendered
+// ground; the player keeps the analytic surface (identical at vertices)
+const hfp = { ...hf, heightAt: terrain.gridHeightAt };
 const water = createWater(terrain.heightTex);
 scene.add(water.mesh);
 await new Promise((r) => setTimeout(r));
-const veg = createVegetation(hf, terrain.heightTex, renderer, sky.sunDir);
+const veg = createVegetation(hfp, terrain.heightTex, renderer, sky.sunDir);
 scene.add(veg.group);
 await new Promise((r) => setTimeout(r));
-const buildings = createBuildings(hf);
+const buildings = createBuildings(hfp);
 scene.add(buildings.group);
-const clutter = createClutter(hf, buildings.colliders);
+const clutter = createClutter(hfp, buildings.colliders);
 scene.add(clutter.group);
 
 // the world never moves after assembly: freeze matrices so the 600+ static
@@ -155,34 +161,12 @@ if (DEBUG) {
 }
 
 // spawn near the first cabin, facing the world center, on validated clear ground
-const home = hf.sites[0] ?? { x: 0, z: 0 };
 const worldCircles = [
   ...veg.trunkColliders,
   ...clutter.circles,
   ...buildings.circles,
 ];
-const spawnClear = (x, z) =>
-  hf.heightAt(x, z) > 0.5 &&
-  !worldCircles.some(
-    (c) => (c.x - x) ** 2 + (c.z - z) ** 2 < (c.r + 1.2) ** 2,
-  ) &&
-  !buildings.colliders.some(
-    (b) => x > b.minX - 1 && x < b.maxX + 1 && z > b.minZ - 1 && z < b.maxZ + 1,
-  );
-let spawnX = home.x + 10;
-let spawnZ = home.z + 10;
-outer: for (let rad = 10; rad <= 26; rad += 4) {
-  for (let a = 0; a < 12; a++) {
-    const x = home.x + Math.cos((a / 12) * Math.PI * 2) * rad;
-    const z = home.z + Math.sin((a / 12) * Math.PI * 2) * rad;
-    if (spawnClear(x, z)) {
-      spawnX = x;
-      spawnZ = z;
-      break outer;
-    }
-  }
-}
-const spawn = { x: spawnX, z: spawnZ, yaw: Math.atan2(spawnX, spawnZ) };
+const spawn = findSpawn(hfp, worldCircles, buildings.colliders);
 const player = new Player(
   camera,
   input,

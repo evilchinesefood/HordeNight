@@ -17,11 +17,29 @@ const phi = THREE.MathUtils.degToRad(90 - SUN_ELEVATION);
 const theta = THREE.MathUtils.degToRad(SUN_AZIMUTH);
 const SUN_DIR = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
 
+// three deep-clones fog uniform values into EVERY material, freezing them.
+// These subclasses return themselves from clone(), so all materials share
+// one mutable instance - night/storm can re-tint the fog patch at runtime
+class SharedColor extends THREE.Color {
+  clone() {
+    return this;
+  }
+}
+class SharedVector3 extends THREE.Vector3 {
+  clone() {
+    return this;
+  }
+}
+const FOG_SUN_DAY = new THREE.Color(0xfff3e0);
+const FOG_SUN_WET = new THREE.Color(0x9aa3ac);
+const FOG_SUN_NIGHT = new THREE.Color(0x141a28);
+const FOG_SUN_COLOR = new SharedColor(0xfff3e0);
+
 Object.assign(THREE.UniformsLib.fog, {
   // horizon-projected: fogged geometry sits at/below the horizon, so the
   // elevation-true dir would zero the pow() lobe (cos(55deg)^24 ~ 1.6e-6)
-  uFogSunDir: { value: new THREE.Vector3(SUN_DIR.x, 0, SUN_DIR.z).normalize() },
-  uFogSunColor: { value: new THREE.Color(0xfff3e0) },
+  uFogSunDir: { value: new SharedVector3(SUN_DIR.x, 0, SUN_DIR.z).normalize() },
+  uFogSunColor: { value: FOG_SUN_COLOR },
   uFogBaseY: { value: 2.0 },
   uFogHeightDecay: { value: 0.06 },
 });
@@ -242,10 +260,14 @@ export function createSky(scene) {
     u.mieCoefficient.value = CLEAR.mie + w * 0.007;
     u.rayleigh.value = CLEAR.rayleigh - w * 0.46; // blue dies fully in a storm
     u.uDim.value = 1 - w * 0.55; // and the dome itself darkens
+    // the shared fog in-scatter tint follows: gray in storms, dark at night
+    if (nightOn) FOG_SUN_COLOR.copy(FOG_SUN_NIGHT);
+    else FOG_SUN_COLOR.copy(FOG_SUN_DAY).lerp(FOG_SUN_WET, w * 0.8);
     clouds.setTone(cloudTone(w));
   };
   const setNight = (on) => {
     nightOn = on;
+    FOG_SUN_COLOR.copy(on ? FOG_SUN_NIGHT : FOG_SUN_DAY);
     u.sunPosition.value.copy(on ? NIGHT_DIR : SUN_DIR);
     sun.intensity = on ? 0.4 : 3.0;
     sun.color.set(on ? 0x91a8d0 : 0xfff1d8);

@@ -58,12 +58,35 @@ export function createPostFx(
 
   // constructed only when used: the pass allocates its 11-target mip chain immediately
   if (bloom) composer.addPass(new UnrealBloomPass(size, 0.1, 0.25, 2.6));
-  composer.addPass(new OutputPass());
 
-  const vignette = new ShaderPass(VignetteShader);
-  vignette.uniforms.offset.value = 1.05;
-  vignette.uniforms.darkness.value = 1.12;
-  composer.addPass(vignette);
+  // vignette folded into OutputPass: saves a full-resolution ping-pong vs a
+  // separate ShaderPass; same display-space math as VignetteShader
+  const out = new OutputPass();
+  const frag = out.material.fragmentShader;
+  const PREC = "precision highp float;";
+  if (frag.includes(PREC) && /}\s*$/.test(frag)) {
+    out.material.fragmentShader = frag
+      .replace(
+        PREC,
+        PREC + "\nuniform float uVigOffset;\nuniform float uVigDarkness;",
+      )
+      .replace(
+        /}\s*$/,
+        `vec2 vigUv = ( vUv - vec2( 0.5 ) ) * vec2( uVigOffset );
+gl_FragColor = vec4( mix( gl_FragColor.rgb, vec3( 1.0 - uVigDarkness ), dot( vigUv, vigUv ) ), gl_FragColor.a );
+}`,
+      );
+    out.uniforms.uVigOffset = { value: 1.05 };
+    out.uniforms.uVigDarkness = { value: 1.12 };
+    composer.addPass(out);
+  } else {
+    console.warn("OutputShader changed - separate vignette pass fallback");
+    composer.addPass(out);
+    const vignette = new ShaderPass(VignetteShader);
+    vignette.uniforms.offset.value = 1.05;
+    vignette.uniforms.darkness.value = 1.12;
+    composer.addPass(vignette);
+  }
 
   return {
     render: () => composer.render(),

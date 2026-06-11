@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import { HALF, WATER_Y } from "../Core/Heightfield.js";
-import { Mulberry } from "../Core/Rng.js";
+import { HALF } from "../Core/Heightfield.js";
 import { rockSurfaceSet } from "../Engine/Textures.js";
+import { clutterLayout } from "../Core/Placement.js";
 
-const ROCK_COUNT = 680;
-const LOG_COUNT = 16;
+// rocks are bucketed into a coarse grid: one world-spanning InstancedMesh can
+// never be frustum-culled, 9 regional ones cull fine for ~no extra draws
+const REGIONS = 3;
 
 // position-hashed radial jitter keeps the non-indexed icosahedron crack-free
 function rockGeo() {
@@ -33,61 +34,42 @@ function rockGeo() {
 }
 
 export function createClutter(hf, buildingBoxes = []) {
-  const rng = Mulberry(hf.seed + 67);
   const group = new THREE.Group();
-  const circles = [];
+  // every placement decision (and RNG draw) lives in Core/Placement.js
+  const { rocks, logs, circles } = clutterLayout(hf, buildingBoxes);
   const m = new THREE.Matrix4();
   const e = new THREE.Euler();
+  const v = new THREE.Vector3();
   const col = new THREE.Color();
-  // hollow buildings: rocks/logs must not pierce walls or squat in interiors
-  const inBuilding = (x, z, r) =>
-    buildingBoxes.some(
-      (b) =>
-        x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r,
-    );
 
-  const slopeAt = (x, z) =>
-    Math.abs(hf.heightAt(x + 2, z) - hf.heightAt(x - 2, z)) +
-    Math.abs(hf.heightAt(x, z + 2) - hf.heightAt(x, z - 2));
-
-  // --- rocks: denser on steep/rocky ground, a few on the banks ---
   const rockTex = rockSurfaceSet(hf.seed + 61);
   const rockMat = new THREE.MeshStandardMaterial({
     map: rockTex.map,
     normalMap: rockTex.nor,
     roughness: 0.95,
   });
-  const rocks = new THREE.InstancedMesh(rockGeo(), rockMat, ROCK_COUNT);
-  let placed = 0;
-  for (let i = 0; i < ROCK_COUNT * 8 && placed < ROCK_COUNT; i++) {
-    const x = (rng() * 2 - 1) * (HALF - 10);
-    const z = (rng() * 2 - 1) * (HALF - 10);
-    const y = hf.heightAt(x, z);
-    if (y < WATER_Y - 0.4) continue;
-    const steep = slopeAt(x, z) > 1.6;
-    if (!steep && rng() > 0.45) continue;
-    if (hf.sites.some((s) => (s.x - x) ** 2 + (s.z - z) ** 2 < 7 ** 2))
-      continue;
-    const s = 0.25 + rng() * rng() * 1.5;
-    if (inBuilding(x, z, 0.8 * s + 0.2)) continue;
-    m.makeRotationFromEuler(
-      e.set(rng() * 0.5, rng() * Math.PI * 2, rng() * 0.5),
-    );
-    m.scale(new THREE.Vector3(s, s, s));
-    m.setPosition(x, y - 0.18 * s, z);
-    rocks.setMatrixAt(placed, m);
-    const g = 0.42 + rng() * 0.26;
-    rocks.setColorAt(
-      placed,
-      col.setRGB(g * (1 + rng() * 0.08), g, g * (0.94 + rng() * 0.06)),
-    );
-    if (s > 0.6) circles.push({ x, z, r: 0.8 * s, topY: y + 0.7 * s });
-    placed++;
+  const geo = rockGeo();
+  const cell = (HALF * 2) / REGIONS;
+  const buckets = Array.from({ length: REGIONS * REGIONS }, () => []);
+  for (const r of rocks) {
+    const cx = Math.min(REGIONS - 1, ((r.x + HALF) / cell) | 0);
+    const cz = Math.min(REGIONS - 1, ((r.z + HALF) / cell) | 0);
+    buckets[cx * REGIONS + cz].push(r);
   }
-  rocks.count = placed;
-  rocks.castShadow = true;
-  rocks.receiveShadow = true;
-  group.add(rocks);
+  for (const bucket of buckets) {
+    if (!bucket.length) continue;
+    const mesh = new THREE.InstancedMesh(geo, rockMat, bucket.length);
+    bucket.forEach((r, j) => {
+      m.makeRotationFromEuler(e.set(r.rx, r.ry, r.rz));
+      m.scale(v.set(r.s, r.s, r.s));
+      m.setPosition(r.x, r.y - 0.18 * r.s, r.z);
+      mesh.setMatrixAt(j, m);
+      mesh.setColorAt(j, col.setRGB(r.cr, r.cg, r.cb));
+    });
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
 
   // --- fallen logs ---
   const logGeo = new THREE.CylinderGeometry(0.26, 0.34, 1, 7)
@@ -97,36 +79,16 @@ export function createClutter(hf, buildingBoxes = []) {
     color: 0x5f4a35,
     roughness: 1,
   });
-  const logs = new THREE.InstancedMesh(logGeo, logMat, LOG_COUNT);
-  let lp = 0;
-  for (let i = 0; i < LOG_COUNT * 30 && lp < LOG_COUNT; i++) {
-    const x = (rng() * 2 - 1) * (HALF - 16);
-    const z = (rng() * 2 - 1) * (HALF - 16);
-    const y = hf.heightAt(x, z);
-    if (y < WATER_Y + 0.5 || slopeAt(x, z) > 1.2) continue;
-    if (hf.sites.some((s) => (s.x - x) ** 2 + (s.z - z) ** 2 < 11 ** 2))
-      continue;
-    if (inBuilding(x, z, 2.5)) continue; // sheds sit outside the 11m site gate
-    const L = 2.6 + rng() * 2;
-    const a = rng() * Math.PI * 2;
-    m.makeRotationFromEuler(e.set(0, a, (rng() - 0.5) * 0.1));
-    m.scale(new THREE.Vector3(L, 1, 1));
-    m.setPosition(x, y - 0.06, z);
-    logs.setMatrixAt(lp, m);
-    for (const t of [-0.32, 0, 0.32]) {
-      circles.push({
-        x: x + Math.cos(a) * t * L,
-        z: z - Math.sin(a) * t * L,
-        r: 0.42,
-        topY: y + 0.55,
-      });
-    }
-    lp++;
-  }
-  logs.count = lp;
-  logs.castShadow = true;
-  logs.receiveShadow = true;
-  group.add(logs);
+  const logMesh = new THREE.InstancedMesh(logGeo, logMat, logs.length);
+  logs.forEach((l, i) => {
+    m.makeRotationFromEuler(e.set(0, l.a, l.tilt));
+    m.scale(v.set(l.L, 1, 1));
+    m.setPosition(l.x, l.y - 0.06, l.z);
+    logMesh.setMatrixAt(i, m);
+  });
+  logMesh.castShadow = true;
+  logMesh.receiveShadow = true;
+  group.add(logMesh);
 
   return { group, circles };
 }

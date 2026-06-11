@@ -25,6 +25,13 @@ export default defineConfig({
   publicDir: "Public",
   plugins: [PascalIndex()],
   build: {
-    rollupOptions: { input: "Index.html" },
+    rollupOptions: {
+      input: "Index.html",
+      output: {
+        // vendor split: the app shell parses while ez-tree's inlined bark
+        // JPEGs (the bulk of the old 4.6MB single chunk) still stream
+        manualChunks: { three: ["three"], eztree: ["@dgreenheck/ez-tree"] },
+      },
+    },
   },
 });

@@ -3,6 +3,7 @@ import { Tree } from "@dgreenheck/ez-tree";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { HALF, WATER_Y } from "../Core/Heightfield.js";
 import { Mulberry } from "../Core/Rng.js";
+import { placeTrees, treeParams, clearOfSites } from "../Core/Placement.js";
 import { RES } from "./Terrain.js";
 import {
   fluffyTuftTexture,
@@ -11,9 +12,6 @@ import {
   impostorCardTexture,
 } from "../Engine/Textures.js";
 
-const TREE_TRIES = 9000;
-const TREE_CELL = 5;
-const TREE_CAP = 1500;
 const CHUNKS = 10; // NxN world grid per variant so camera + shadow frustums can cull
 const HANDOFF = 64; // chunk-center distance where full detail swaps to impostors
 const LOD_DIST = HANDOFF + 29; // + chunk half-diagonal margin (40m cells)
@@ -129,27 +127,8 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
   const uCamPos = { value: new THREE.Vector3() };
   const uGust = { value: 1 }; // weather scales the rolling wind fronts
 
-  const clearOfSites = (x, z, pad) =>
-    hf.sites.every((s) => (s.x - x) ** 2 + (s.z - z) ** 2 > pad * pad);
-
-  // --- tree placement ---
-  const pines = [];
-  const oaks = [];
-  const cells = new Set();
-  for (let i = 0; i < TREE_TRIES; i++) {
-    if (pines.length + oaks.length >= TREE_CAP) break;
-    const x = (rng() * 2 - 1) * (HALF - 12);
-    const z = (rng() * 2 - 1) * (HALF - 12);
-    const key = `${Math.floor(x / TREE_CELL)},${Math.floor(z / TREE_CELL)}`;
-    if (cells.has(key)) continue;
-    const y = hf.heightAt(x, z);
-    if (y < WATER_Y + 0.8) continue;
-    const slope = Math.abs(hf.heightAt(x + 2, z) - hf.heightAt(x - 2, z));
-    if (slope > 1.7) continue;
-    if (!clearOfSites(x, z, 13)) continue;
-    cells.add(key);
-    (rng() < 0.55 ? pines : oaks).push({ x, y, z, s: 0.75 + rng() * 0.75 });
-  }
+  // --- tree placement (decisions + RNG draws live in Core/Placement.js) ---
+  const { pines, oaks } = placeTrees(rng, hf);
 
   // canopy sway, instancing-safe (ez-tree's built-in wind drops instanceMatrix);
   // sway params are per-material uniforms so all variants share ONE program
@@ -254,14 +233,11 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
       );
       leaves.customDepthMaterial = leafDepth;
       bucket.forEach(([t, i], j) => {
-        // one stream, drawn once: full tree and impostor share these values
-        const r = Mulberry(i * 7 + hf.seed + spec.seed);
+        // one stream, drawn once in Placement.treeParams: full tree and
+        // impostor consume the same object, so they cannot desync
+        const { rot, ys, g, red } = treeParams(i, hf.seed, spec.seed);
         const targetH = heightOf(t.s);
         const sc = targetH / variant.height;
-        const rot = r() * Math.PI * 2;
-        const ys = 0.92 + r() * 0.16;
-        const g = 0.95 + r() * 0.3;
-        const red = g * (0.95 + r() * 0.1);
         m.makeRotationY(rot);
         m.scale(v.set(sc, sc * ys, sc));
         m.setPosition(t.x, t.y - 0.1, t.z);
@@ -531,7 +507,7 @@ export function createVegetation(hf, heightTex, renderer, sunDir) {
     const z = (rng() * 2 - 1) * (HALF - 10);
     const y = hf.heightAt(x, z);
     if (y < WATER_Y + 0.4) continue;
-    if (!clearOfSites(x, z, 9)) continue;
+    if (!clearOfSites(hf, x, z, 9)) continue;
     const s = 0.55 + rng() * 1.0;
     m.makeRotationY(rng() * Math.PI * 2);
     m.scale(v.set(s, s * (0.8 + rng() * 0.35), s));

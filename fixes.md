@@ -216,16 +216,27 @@ Open in a fresh Claude Code session and ask: "Work through the fixes in fixes.md
 - **Audio noise-buffer generation inside the first click (~10ms once)** — not worth pre-generation complexity.
 - **Residual cumulus corner clipping at map-edge sightlines** — accepted in Round 1 fix 17's ±600 compromise (the cirrus regression beyond it is task 18).
 
-## Deferred (real, but pre-M2/M3 architecture work — not auto-fixed)
+## Deferred — CLOSED in the follow-up pass (2026-06-11, same day)
 
-1. **CPU height grid for placement** — keep a Float32Array of the 385² terrain heights; placement (trees/rocks/bushes/buildings/spawn) reads bilinear grid instead of re-deriving 7-octave FBM ~60k times (~450k simplex evals, 40-100ms startup). Also seats objects on the *rendered* surface. Changes borderline placement accepts → world layout shifts subtly on the same seed; do as its own verified pass alongside the Core/Placement.js extraction.
-2. **Worker offload of terrain attribute fill + OffscreenCanvas texture gen** — the remaining ~1.5-3s of synchronous world-gen.
-3. **Mutable lighting state** (Round 1 deferred, now urgent-adjacent): setNight/setOvercast/fog-patch uniforms unify; removes task 8's partial-ness.
-4. **Foliage mips via alphaToCoverage or alpha-boosted mip chains** — visual tuning pass with browser A/B.
-5. **Vignette folded into OutputPass** — saves one full-res ping-pong; composer restructure.
-6. **Rock/log InstancedMesh chunking for frustum culling** (~160-180k always-on tris across 3 passes) — only if profiling shows vertex-bound.
-7. **Bundle splitting (manualChunks: three/ez-tree)** — 4.6MB single chunk today; fine for M1.
+1. **CPU height grid for placement** — DONE. `TerrainFill.makeGridSampler` over the 385² lattice; Main wraps `hfp = { ...hf, heightAt: terrain.gridHeightAt }` for veg/buildings/clutter/spawn. Objects now seat on the *rendered* surface. As predicted, borderline placement accepts shift the world subtly on the same seed (accepted). Player stays analytic.
+2. **Worker offload** — DONE for the dominant block: `TerrainWorker` computes heights/normals/colors/splat off-thread (normals via a bit-faithful `computeVertexNormals` port, verified against THREE in tests) while texture generation overlaps on the main thread; inline `fillTerrain` is the fallback. The ez-tree generation phase stays main-thread between yields (THREE objects + Image decoding can't workerize cheaply).
+3. **Mutable lighting state** — DONE pragmatically: fog-patch uniforms are now genuinely shared (self-cloning Color/Vector3 subclasses defeat three's per-material deep clone), so storms gray the in-scatter and night darkens it live. The full Game-state lighting orchestration still belongs to M2's day/night cycle.
+4. **Foliage mips** — DONE via the alpha-boosted-mip-chain variant (boost 1.3/level) on leaf clusters + painted impostor cards; bake RT mips landed in round 2. A2C not used (samples:2 gives too few coverage levels). **[visual]** check for distant thinning/washout.
+5. **Vignette folded into OutputPass** — DONE (fragment patch after color-space conversion, identical math; separate-pass fallback if a three upgrade changes OutputShader). One full-res ping-pong removed.
+6. **Rock chunking** — DONE: rocks bucket into a 3×3 regional grid (9 cullable InstancedMeshes). Logs (16 instances) stay single-mesh.
+7. **Bundle splitting** — DONE: app shell 130KB + three 509KB + eztree 4.0MB chunks (was one 4.6MB chunk).
 
-## Test gaps noted (Critical Thinker)
+## Test gaps — CLOSED
 
-Added now: swept-fall step-band case; speed×dt<radius assertion. Still missing (need the deferred Placement extraction): building-shell doorway/lintel/floor semantics; full↔impostor RNG parity as a pinned unit test; cross-seed spawn-clearance sweep.
+All three landed with the `Core/Placement.js` extraction (every placement decision + RNG draw moved out of the THREE modules, Node-testable; 20 tests green):
+- Building-shell semantics: doorway passes standing, lintel blocks jumpers, floor stands, no exterior ledge, walls block.
+- Full↔impostor parity: `treeParams` is the single draw site both consumers read — desync now impossible by construction, plus pinned-value test.
+- Cross-seed sweep: spawn validated clear for seeds 1–20 (conservative trunk radii, analytic heights).
+- Bonus: `worldAabb` matches the THREE mesh transform (≤1e-9), `fillTerrain` matches THREE's geometry computation (≤1e-6).
+
+## Still open by design (M2/M3-scoped, from Round 1)
+
+- **Spatial grid for collision** — needs zombies (M3) to pay for itself.
+- **Game/system orchestration object** — needs M2's first cross-system state.
+- **MSAA-through-composer restructure + bloom cost decision** — need browser profiling (`?nobloom` toggle is now measurement-valid).
+- **Underwater treatment** — M3 gameplay.

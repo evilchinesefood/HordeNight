@@ -1,11 +1,9 @@
 import * as THREE from "three";
-import { WORLD_SIZE, HALF, WATER_Y } from "../Core/Heightfield.js";
-import { Fbm2 } from "../Core/Noise.js";
+import { WORLD_SIZE, HALF } from "../Core/Heightfield.js";
 import { groundTextureSet, causticTexture } from "../Engine/Textures.js";
-import { buildSitePaths, pathDistance } from "../Core/SitePaths.js";
+import { fillTerrain, makeGridSampler } from "./TerrainFill.js";
 
 export const RES = 384; // heightTex grid: shared by the water + grass shaders
-const clamp01 = (t) => Math.max(0, Math.min(1, t));
 
 const SPLAT_GLSL = `
   vec2 gUv = vNormalMapUv * 100.0;
@@ -42,71 +40,66 @@ const NORMAL_GLSL = `
   normal = normalize( tbn * mapN );
 `;
 
-export function createTerrain(hf, anisotropy = 4) {
+export async function createTerrain(hf, anisotropy = 4) {
   const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, RES, RES);
   geo.rotateX(-Math.PI / 2);
 
   const pos = geo.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    pos.setY(i, hf.heightAt(pos.getX(i), pos.getZ(i)));
+  const n = pos.count;
+  const xs = new Float32Array(n);
+  const zs = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    xs[i] = pos.getX(i);
+    zs[i] = pos.getZ(i);
   }
-  geo.computeVertexNormals();
+  const index = new Uint32Array(geo.index.array);
 
-  const tint = Fbm2(hf.seed + 55);
-  const patches = Fbm2(hf.seed + 56);
-
-  const paths = buildSitePaths(hf.sites, hf.streamDist);
-  const pathDist = (x, z) => pathDistance(paths, x, z);
-
-  const normal = geo.attributes.normal;
-  const colors = new Float32Array(pos.count * 3);
-  const splat = new Float32Array(pos.count * 3); // grass, dirt, rock
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    const ny = normal.getY(i);
-
-    let rock = clamp01((0.8 - ny) / 0.16) + clamp01((y - 11) / 7) * 0.5;
-    let dirt =
-      clamp01((WATER_Y + 0.8 - y) / 1.0) +
-      Math.max(0, patches(x * 0.02, z * 0.02, 3) - 0.42) * 1.4;
-    if (y < WATER_Y) dirt += 2;
-    for (const s of hf.sites) {
-      const dx = x - s.x;
-      const dz = z - s.z;
-      const d2 = dx * dx + dz * dz;
-      // worn ground at buildings
-      if (d2 < 81) dirt += clamp01((9 - Math.sqrt(d2)) / 5) * 0.7;
+  // the two 148k-vertex fill loops run in a worker; texture generation below
+  // overlaps them on the main thread (fillTerrain inline is the fallback)
+  const fillP = new Promise((resolve) => {
+    let worker;
+    try {
+      worker = new Worker(new URL("./TerrainWorker.js", import.meta.url), {
+        type: "module",
+      });
+    } catch {
+      resolve(fillTerrain(hf.seed, xs, zs, index));
+      return;
     }
-    const pd = pathDist(x, z);
-    if (pd < 2.4) dirt += clamp01((2.4 - pd) / 1.5) * 0.85; // worn paths
-    rock = Math.min(rock, 1.5);
-    dirt = Math.min(dirt, 1.5);
-    const grass = Math.max(0, 1 - rock - dirt);
-    const sum = grass + dirt + rock;
-    splat[i * 3] = grass / sum;
-    splat[i * 3 + 1] = dirt / sum;
-    splat[i * 3 + 2] = rock / sum;
+    worker.onmessage = (e) => {
+      resolve(e.data);
+      worker.terminate();
+    };
+    worker.onerror = () => {
+      worker.terminate();
+      resolve(fillTerrain(hf.seed, xs, zs, index));
+    };
+    worker.postMessage({ seed: hf.seed, xs, zs, index });
+  });
 
-    // macro tint only - the texture layers carry the detail
-    const n1 = tint(x * 0.015, z * 0.015, 3);
-    const n2 = tint(x * 0.07, z * 0.07, 2);
-    let b = 0.88 + n1 * 0.18 + n2 * 0.07;
-    if (y < WATER_Y) b *= clamp01(1 + (y - WATER_Y) * 0.35); // darken the bed
-    colors[i * 3] = b * (1 + n1 * 0.05);
-    colors[i * 3 + 1] = b;
-    colors[i * 3 + 2] = b * (1 - n1 * 0.05);
+  const T = groundTextureSet(hf.seed);
+  for (const l of [T.grass, T.dirt, T.rock]) {
+    l.map.anisotropy = anisotropy;
+    l.nor.anisotropy = anisotropy;
   }
+  // generated here, not inside onBeforeCompile: compile runs mid-first-frame
+  const caustic = causticTexture(hf.seed);
+
+  const { heights, normals, colors, splat } = await fillP;
+  for (let i = 0; i < n; i++) pos.setY(i, heights[i]);
+  geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geo.setAttribute("splat", new THREE.BufferAttribute(splat, 3));
+
+  // placement samples the same lattice the mesh renders (bilinear)
+  const gridHeightAt = makeGridSampler(heights, RES, WORLD_SIZE);
 
   // R = terrain height, G = grass density; sampled by the near-field grass shader
   // half-float: linear filtering of 32-bit floats needs a non-core extension
   const HT = RES + 1;
   const hdata = new Uint16Array(HT * HT * 4);
-  for (let i = 0; i < pos.count; i++) {
-    hdata[i * 4] = THREE.DataUtils.toHalfFloat(pos.getY(i));
+  for (let i = 0; i < n; i++) {
+    hdata[i * 4] = THREE.DataUtils.toHalfFloat(heights[i]);
     hdata[i * 4 + 1] = THREE.DataUtils.toHalfFloat(splat[i * 3]);
   }
   const heightTex = new THREE.DataTexture(
@@ -119,14 +112,6 @@ export function createTerrain(hf, anisotropy = 4) {
   heightTex.minFilter = THREE.LinearFilter;
   heightTex.magFilter = THREE.LinearFilter;
   heightTex.needsUpdate = true;
-
-  const T = groundTextureSet(hf.seed);
-  for (const l of [T.grass, T.dirt, T.rock]) {
-    l.map.anisotropy = anisotropy;
-    l.nor.anisotropy = anisotropy;
-  }
-  // generated here, not inside onBeforeCompile: compile runs mid-first-frame
-  const caustic = causticTexture(hf.seed);
 
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -217,5 +202,5 @@ export function createTerrain(hf, anisotropy = 4) {
   const update = (t) => {
     uTime.value = t;
   };
-  return { mesh, heightTex, update };
+  return { mesh, heightTex, update, gridHeightAt };
 }
