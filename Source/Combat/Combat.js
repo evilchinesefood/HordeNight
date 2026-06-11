@@ -144,6 +144,7 @@ export class Combat {
     viewModel,
     hud,
     audio,
+    particles,
     rng,
   }) {
     this.camera = camera;
@@ -153,6 +154,7 @@ export class Combat {
     this.viewModel = viewModel;
     this.hud = hud;
     this.audio = audio;
+    this.particles = particles;
     this.rng = rng;
     this.cd = 0;
     this.reloading = 0;
@@ -204,14 +206,40 @@ export class Combat {
         this.zombies.active,
         w.range,
       );
-      if (!hit) continue;
+      if (!hit) {
+        // only the first stray pellet kicks up ground dust (no shotgun spam)
+        if (i === 0 && this.particles) {
+          const g = this.particles.groundHit(
+            o.x,
+            o.y,
+            o.z,
+            s.x,
+            s.y,
+            s.z,
+            w.range,
+          );
+          if (g) this.particles.dust(g);
+        }
+        continue;
+      }
       hits++;
       headshot ||= hit.head;
       const dmg = w.damage * (hit.head ? w.headMult : 1);
       this.zombies.damage(hit.z, dmg, s.x, s.z, w.knock);
+      if (this.particles)
+        this.particles.blood(
+          { x: o.x + s.x * hit.t, y: o.y + s.y * hit.t, z: o.z + s.z * hit.t },
+          s,
+        );
     }
     if (hits && this.hud) this.hud.hitmarker(headshot);
     if (this.viewModel) this.viewModel.kick(w.kick);
+    if (this.particles && this.viewModel) {
+      const mp = this.viewModel.muzzleWorld();
+      this.particles.muzzle(mp, d);
+      const yw = this.player.yaw;
+      this.particles.casing(mp, { x: Math.cos(yw), z: -Math.sin(yw) });
+    }
     this.player.pitch += w.kick * (0.6 + this.rng() * 0.3);
     if (this.audio) this.audio.shot(inv.selected);
     this.cd = 1 / w.rate;
@@ -244,6 +272,15 @@ export class Combat {
       const dz = z.z - p.z;
       const dd = Math.hypot(dx, dz) || 1;
       this.zombies.damage(z, w.damage, dx / dd, dz / dd, w.knock);
+      if (this.particles)
+        this.particles.blood(
+          {
+            x: z.x - (dx / dd) * 0.35,
+            y: z.y + 1.0 * z.scale,
+            z: z.z - (dz / dd) * 0.35,
+          },
+          { x: dx / dd, y: 0.35, z: dz / dd },
+        );
     }
     if (targets.length) {
       if (this.hud) this.hud.hitmarker(false);

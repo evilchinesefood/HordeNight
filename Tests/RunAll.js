@@ -59,6 +59,9 @@ import {
 } from "../Source/Items/ItemDB.js";
 import { containerLayout } from "../Source/Items/LootContainers.js";
 import { Game } from "../Source/Game.js";
+import { rayGround, stepCasing } from "../Source/Engine/Particles.js";
+import { HEAD_PIVOT_Y } from "../Source/Entity/ZombieMesh.js";
+import { HEAD_Y } from "../Source/Combat/Combat.js";
 import * as THREE from "three";
 
 let passed = 0;
@@ -784,6 +787,62 @@ test("Player: takeDamage clamps at zero and sets dead exactly once", () => {
   assert.equal(p.dead, true);
   p.takeDamage(ATTACK_DMG); // no-op once dead
   assert.equal(p.health, 0);
+});
+
+test("Particles: rayGround marches to the surface, refuses upward rays", () => {
+  const flat = () => 0;
+  const hit = rayGround(flat, 0, 1.7, 0, 0.8, -0.6, 0, 80);
+  assert.ok(hit, "no hit on a downward ray");
+  assert.ok(Math.abs(hit.y) < 0.05, `refined y ${hit.y}`);
+  assert.ok(Math.abs(hit.x - (1.7 / 0.6) * 0.8) < 0.15, `hit x ${hit.x}`);
+  assert.equal(rayGround(flat, 0, 1.7, 0, 0.6, 0.8, 0, 80), null); // upward
+  assert.equal(rayGround(flat, 0, 1.7, 0, 1, 0, 0, 20), null); // level, in range
+  // starting underground returns the origin
+  const under = rayGround(() => 5, 0, 1.7, 0, 1, 0, 0, 20);
+  assert.deepEqual(under, { x: 0, y: 1.7, z: 0 });
+  // sloped terrain still lands on the surface
+  const slope = (x) => x * 0.3;
+  const s = rayGround(slope, 0, 2, 0, 1, -0.2, 0, 80, 0.5);
+  assert.ok(s && Math.abs(s.y - slope(s.x)) < 0.08);
+});
+
+test("Particles: casings fall, bounce with damping, then settle", () => {
+  const flat = () => 0;
+  const c = {
+    x: 0,
+    y: 1,
+    z: 0,
+    vx: 2,
+    vy: 2,
+    vz: 0,
+    rx: 0,
+    ry: 0,
+    rz: 0,
+    avx: 5,
+    avy: 0,
+    avz: 0,
+    life: 5,
+  };
+  let peakVy = 0;
+  let bounced = false;
+  for (let i = 0; i < 600; i++) {
+    const prevVy = c.vy;
+    stepCasing(c, 1 / 60, flat);
+    if (prevVy < -1 && c.vy > 0) {
+      bounced = true;
+      peakVy = c.vy;
+      assert.ok(c.vy < -prevVy * 0.5, "bounce not damped");
+    }
+  }
+  assert.ok(bounced, "never bounced");
+  assert.ok(peakVy > 0.5);
+  assert.ok(Math.abs(c.y - 0.015) < 1e-6, `did not settle: ${c.y}`);
+  assert.equal(c.vy, 0);
+  assert.ok(c.life < 5 - 9);
+});
+
+test("Rig: zombie head pivot matches Combat's analytic head sphere", () => {
+  assert.equal(HEAD_PIVOT_Y, HEAD_Y);
 });
 
 test("Game: best score persists only on improvement", () => {

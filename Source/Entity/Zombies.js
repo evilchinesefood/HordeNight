@@ -67,7 +67,11 @@ export class Zombies {
       2.1 + this.rng() * 0.9,
     );
     z.baseSpeed = z.speed; // night escalation scales from this
-    z.scale = 0.92 + this.rng() * 0.16;
+    z.scale = 0.88 + this.rng() * 0.27;
+    // body variety is free: the rig folds these into instance matrices
+    z.bulk = 0.85 + this.rng() * 0.37;
+    z.hunch = 0.1 + this.rng() * 0.22;
+    z.gait = 0.85 + this.rng() * 0.3;
     z.phase = this.rng() * Math.PI * 2;
     z.y = this.heightAt(p.x, p.z);
     z.yaw = Math.atan2(-(player.pos.x - p.x), -(player.pos.z - p.z));

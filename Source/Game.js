@@ -99,6 +99,7 @@ export class Game {
       locked ? Math.hypot(p.vel.x, p.vel.z) : 0,
       p.grounded,
     );
+    this.particles.update(dt); // cosmetic: keeps settling while paused
     this.weather.update(dt, p.pos, indoor);
     this.water.update(dt);
     this.terrain.update(elapsed);

@@ -21,6 +21,7 @@ import { Inventory } from "./Items/Inventory.js";
 import { LootContainers } from "./Items/LootContainers.js";
 import { Combat } from "./Combat/Combat.js";
 import { ViewModel } from "./Combat/ViewModel.js";
+import { Particles } from "./Engine/Particles.js";
 
 const SEED = 7;
 const QS = new URLSearchParams(location.search);
@@ -168,6 +169,7 @@ scene.add(zombies.group);
 scene.add(camera); // the first-person viewmodel hangs off the camera
 const inventory = new Inventory(); // bat only - guns come from loot
 const viewModel = new ViewModel(camera);
+const particles = new Particles(scene, terrain.gridHeightAt);
 const combat = new Combat({
   camera,
   player,
@@ -176,6 +178,7 @@ const combat = new Combat({
   viewModel,
   hud,
   audio,
+  particles,
   rng: Mulberry(SEED * 131 + 7),
 });
 const game = new Game(
@@ -195,6 +198,7 @@ const game = new Game(
     combat,
     viewModel,
     loot,
+    particles,
   },
   () => {
     hud.flashDeath();
@@ -383,6 +387,7 @@ window.HN = {
   inventory,
   loot,
   input,
+  particles,
 };
 const tp = QS.get("tp");
 if (tp) {
