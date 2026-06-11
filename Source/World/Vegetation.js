@@ -114,7 +114,7 @@ function bakeImpostorTexture(renderer, src) {
   return rt.texture;
 }
 
-export function createVegetation(hf, heightTex, renderer) {
+export function createVegetation(hf, heightTex, renderer, sunDir) {
   const rng = Mulberry(hf.seed + 31);
   const group = new THREE.Group();
   const trunkColliders = [];
@@ -123,6 +123,7 @@ export function createVegetation(hf, heightTex, renderer) {
   const col = new THREE.Color();
   const uTime = { value: 0 };
   const uCamPos = { value: new THREE.Vector3() };
+  const uGust = { value: 1 }; // weather scales the rolling wind fronts
 
   const clearOfSites = (x, z, pad) =>
     hf.sites.every((s) => (s.x - x) ** 2 + (s.z - z) ** 2 > pad * pad);
@@ -360,11 +361,14 @@ export function createVegetation(hf, heightTex, renderer) {
     Object.assign(s.uniforms, {
       uTime,
       uCamPos,
+      uGust,
       uHeightTex: { value: heightTex },
       uNoise: { value: softNoiseTexture(hf.seed) },
       uBase: { value: new THREE.Color(0x36481c) },
       uTip1: { value: new THREE.Color(0xa6dd96) },
       uTip2: { value: new THREE.Color(0x3c6336) },
+      uSunDir: { value: (sunDir ?? new THREE.Vector3(0, 1, 0)).clone() },
+      uSunCol: { value: new THREE.Color(0xffe9b8) },
     });
     s.vertexShader = s.vertexShader
       .replace(
@@ -372,9 +376,11 @@ export function createVegetation(hf, heightTex, renderer) {
         `#include <common>
         uniform float uTime;
         uniform vec3 uCamPos;
+        uniform float uGust;
         uniform sampler2D uHeightTex;
         uniform sampler2D uNoise;
-        varying float vPatch;`,
+        varying float vPatch;
+        varying vec3 vGrassW;`,
       )
       .replace(
         "#include <begin_vertex>",
@@ -387,14 +393,27 @@ export function createVegetation(hf, heightTex, renderer) {
         vec4 gHs = texture2D( uHeightTex, gUv );
         float gDist = distance( gWp, uCamPos.xz );
         float gJit = texture2D( uNoise, gWp * 0.13 ).r - 0.5;
-        float gFade = ( 1.0 - smoothstep( 14.0, 25.0, gDist ) ) * smoothstep( 0.35, 0.62, gHs.g + gJit * 0.35 );
+        float gFade = ( 1.0 - smoothstep( 18.0, 30.0, gDist ) ) * smoothstep( 0.35, 0.62, gHs.g + gJit * 0.35 );
         gFade *= 1.0 - step( 198.0, max( abs( gWp.x ), abs( gWp.y ) ) );
         transformed = gRs * transformed * gFade;
         float gBend = uv.y * uv.y * gFade;
         float gGust = texture2D( uNoise, gWp * 0.011 + uTime * 0.013 ).r - 0.5;
         transformed.x += ( sin( uTime * 1.6 + gWp.x * 0.9 + gWp.y * 0.8 ) + gGust * 2.6 ) * gBend * 0.13;
         transformed.z += ( cos( uTime * 1.2 + gWp.x * 0.7 ) + gGust * 2.0 ) * gBend * 0.1;
+        // rolling gust fronts: directional phase + drifting noise envelope
+        vec2 gWdir = vec2( 0.78, 0.63 );
+        float gEnv = smoothstep( 0.35, 0.75,
+          texture2D( uNoise, gWp * 0.008 + gWdir * uTime * 0.021 ).r ) * uGust;
+        transformed.xz += gWdir * sin( dot( gWp, gWdir ) * 0.14 + uTime * 1.9 ) * gEnv * gBend * 0.5;
+        // player walks through: tufts part aside and press down
+        vec2 gToB = gWp - uCamPos.xz;
+        float gPd = max( length( gToB ), 0.001 );
+        float gPush = 1.0 - smoothstep( 0.0, 1.3, gPd );
+        gPush *= gPush * uv.y * uv.y;
+        transformed.xz += ( gToB / gPd ) * gPush * 0.55;
+        transformed.y -= gPush * 0.3;
         transformed += vec3( gWp.x, gHs.r, gWp.y );
+        vGrassW = transformed;
         vPatch = texture2D( uNoise, gWp * 0.016 ).r;`,
       )
       .replace(
@@ -415,14 +434,27 @@ export function createVegetation(hf, heightTex, renderer) {
         uniform vec3 uBase;
         uniform vec3 uTip1;
         uniform vec3 uTip2;
-        varying float vPatch;`,
+        uniform vec3 uSunDir;
+        uniform vec3 uSunCol;
+        varying float vPatch;
+        varying vec3 vGrassW;`,
       )
       .replace(
         "#include <map_fragment>",
         `vec4 gTuftTexel = texture2D( map, vMapUv );
         vec3 gTip = mix( uTip1, uTip2, smoothstep( 0.2, 0.8, vPatch ) );
         diffuseColor.rgb = mix( uBase, gTip, smoothstep( 0.05, 1.0, vMapUv.y ) ) * gTuftTexel.r;
+        // roots sit in shadowed thatch
+        diffuseColor.rgb *= 0.55 + 0.45 * smoothstep( 0.0, 0.45, vMapUv.y );
         diffuseColor.a = gTuftTexel.a;`,
+      )
+      .replace(
+        "#include <emissivemap_fragment>",
+        `#include <emissivemap_fragment>
+        // backlit tips: sun glows through blades when it sits behind them
+        vec3 gV = normalize( cameraPosition - vGrassW );
+        float gSss = pow( max( dot( -gV, uSunDir ), 0.0 ), 3.0 );
+        totalEmissiveRadiance += uSunCol * gSss * smoothstep( 0.3, 1.0, vMapUv.y ) * gTuftTexel.r * 0.3;`,
       );
   };
 
@@ -505,8 +537,9 @@ export function createVegetation(hf, heightTex, renderer) {
   let lastT = 0;
   const fading = new Set();
   const FADE = 3.2; // dissolve speed (1/s)
-  const update = (t, camPos) => {
+  const update = (t, camPos, gust = 1) => {
     uTime.value = t;
+    uGust.value = gust;
     const dt = Math.max(0, Math.min(t - lastT, 0.1));
     lastT = t;
     if (!camPos) return;

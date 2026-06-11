@@ -145,7 +145,47 @@ export function impostorCardTexture(seed = 3, pine = false) {
   return tex;
 }
 
-// soft cloud puff: layered radial gradients on transparent bg
+// deterministic value-noise FBM for cloud alpha erosion
+function fbm2(seed) {
+  const h = (x, y) => {
+    const s = Math.sin(x * 127.1 + y * 311.7 + seed * 13.7) * 43758.5453;
+    return s - Math.floor(s);
+  };
+  const vn = (x, y) => {
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const fx = x - ix;
+    const fy = y - iy;
+    const ux = fx * fx * (3 - 2 * fx);
+    const uy = fy * fy * (3 - 2 * fy);
+    const a = h(ix, iy);
+    const b = h(ix + 1, iy);
+    const c = h(ix, iy + 1);
+    const d = h(ix + 1, iy + 1);
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+  };
+  return (x, y, oct = 4) => {
+    let sum = 0;
+    let amp = 1;
+    let max = 0;
+    for (let i = 0; i < oct; i++) {
+      sum += vn(x, y) * amp;
+      max += amp;
+      amp *= 0.5;
+      x *= 2;
+      y *= 2;
+    }
+    return sum / max;
+  };
+}
+
+const smooth01 = (e0, e1, v) => {
+  const t = Math.min(1, Math.max(0, (v - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+// cumulus puff: domed blob stack, FBM-eroded cauliflower edges, flat
+// shaded base (clouds-skill billboard recipe)
 export function cloudTexture(seed = 8) {
   const S = 256;
   const rng = Mulberry(seed);
@@ -161,22 +201,94 @@ export function cloudTexture(seed = 8) {
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   };
-  for (let i = 0; i < 7; i++) {
+  // dome: big lobes ride higher in the middle, base row sits near y 0.6
+  for (let i = 0; i < 9; i++) {
+    const u = 0.18 + rng() * 0.64;
+    const lift = Math.sin(u * Math.PI) * 0.2;
     blob(
-      S * (0.25 + rng() * 0.5),
-      S * (0.42 + rng() * 0.2),
-      S * (0.14 + rng() * 0.12),
-      0.5 + rng() * 0.3,
+      S * u,
+      S * (0.58 - lift * (0.5 + rng() * 0.5)),
+      S * (0.1 + rng() * 0.12),
+      0.55 + rng() * 0.3,
     );
   }
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 16; i++) {
     blob(
-      S * (0.15 + rng() * 0.7),
-      S * (0.35 + rng() * 0.3),
-      S * (0.05 + rng() * 0.07),
+      S * (0.14 + rng() * 0.72),
+      S * (0.3 + rng() * 0.32),
+      S * (0.04 + rng() * 0.07),
       0.35,
     );
   }
+  const fbm = fbm2(seed);
+  const img = ctx.getImageData(0, 0, S, S);
+  const d = img.data;
+  for (let y = 0; y < S; y++) {
+    const t = y / S;
+    const baseCut = 1 - smooth01(0.62, 0.74, t); // flat cumulus base
+    const shade = 1 - 0.3 * smooth01(0.34, 0.7, t); // self-shadowed underside
+    for (let x = 0; x < S; x++) {
+      const i = (y * S + x) * 4;
+      const a = d[i + 3] / 255;
+      if (!a) continue;
+      const n = fbm(x / 42, y / 42);
+      // erosion strongest at thin edges -> cauliflower silhouette
+      const edge = smooth01(0.06, 0.55, a);
+      const carved =
+        a * (edge + (1 - edge) * smooth01(0.42, 0.62, n)) * baseCut;
+      d[i + 3] = Math.min(255, carved * 268);
+      d[i] *= shade * 0.96;
+      d[i + 1] *= shade * 0.97;
+      d[i + 2] *= shade; // base drifts cool blue-gray
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// high-altitude cirrus: long combed streaks, anisotropic FBM erosion
+export function cirrusTexture(seed = 12) {
+  const S = 256;
+  const rng = Mulberry(seed);
+  const [c, ctx] = canvas(S);
+  ctx.clearRect(0, 0, S, S);
+  ctx.lineCap = "round";
+  for (let i = 0; i < 26; i++) {
+    const y = S * (0.2 + rng() * 0.6);
+    const x0 = S * rng() * 0.4;
+    const len = S * (0.4 + rng() * 0.55);
+    const g = ctx.createLinearGradient(x0, y, x0 + len, y);
+    const a = 0.16 + rng() * 0.2;
+    g.addColorStop(0, "rgba(255,255,255,0)");
+    g.addColorStop(0.3, `rgba(255,255,255,${a})`);
+    g.addColorStop(0.75, `rgba(252,252,255,${a * 0.7})`);
+    g.addColorStop(1, "rgba(250,250,255,0)");
+    ctx.strokeStyle = g;
+    ctx.lineWidth = 1.5 + rng() * 5;
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.quadraticCurveTo(
+      x0 + len * 0.5,
+      y - S * (rng() * 0.06),
+      x0 + len,
+      y + S * (rng() * 0.05),
+    );
+    ctx.stroke();
+  }
+  const fbm = fbm2(seed + 5);
+  const img = ctx.getImageData(0, 0, S, S);
+  const d = img.data;
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const i = (y * S + x) * 4;
+      if (!d[i + 3]) continue;
+      const n = fbm(x / 90, y / 14); // stretched along the streaks
+      d[i + 3] *= 0.35 + n * 0.85;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;

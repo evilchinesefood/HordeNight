@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { Sky } from "three/addons/objects/Sky.js";
-import { cloudTexture } from "./Textures.js";
+import { cloudTexture, cirrusTexture } from "./Textures.js";
 import { Mulberry } from "../Core/Rng.js";
 
 const SUN_ELEVATION = 14; // low sun -> long shadows
@@ -67,53 +67,85 @@ THREE.ShaderChunk.fog_fragment = /* glsl */ `
 function createClouds(scene) {
   const rng = Mulberry(99);
   const geo = new THREE.PlaneGeometry(1, 1);
-  const mat = new THREE.MeshBasicMaterial({
-    map: cloudTexture(),
-    color: new THREE.Color(1.5, 1.42, 1.3), // warm-lit, reads through ACES
-    transparent: true,
-    opacity: 0.55,
-    depthWrite: false,
-    fog: false,
-  });
-  mat.customProgramCacheKey = () => "hn-cloud";
-  mat.onBeforeCompile = (s) => {
-    // view-aligned billboard, scale from the instance matrix
-    s.vertexShader = s.vertexShader.replace(
-      "#include <project_vertex>",
-      `vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );
-      mvPosition.xy += position.xy *
-        vec2( length( instanceMatrix[0].xyz ), length( instanceMatrix[1].xyz ) );
-      gl_Position = projectionMatrix * mvPosition;`,
-    );
+  const billboard = (mat) => {
+    mat.customProgramCacheKey = () => "hn-cloud";
+    mat.onBeforeCompile = (s) => {
+      // view-aligned billboard, scale from the instance matrix
+      s.vertexShader = s.vertexShader.replace(
+        "#include <project_vertex>",
+        `vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );
+        mvPosition.xy += position.xy *
+          vec2( length( instanceMatrix[0].xyz ), length( instanceMatrix[1].xyz ) );
+        gl_Position = projectionMatrix * mvPosition;`,
+      );
+    };
+    return mat;
   };
-
-  const clouds = new THREE.InstancedMesh(geo, mat, CLOUD_COUNT);
-  clouds.layers.set(CLOUD_LAYER);
-  clouds.frustumCulled = false;
-  clouds.renderOrder = 5;
-  const items = [];
-  for (let i = 0; i < CLOUD_COUNT; i++) {
-    items.push({
+  const layers = [];
+  const makeLayer = (map, color, opacity, order, count, gen) => {
+    const mat = billboard(
+      new THREE.MeshBasicMaterial({
+        map,
+        color,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    mesh.layers.set(CLOUD_LAYER);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = order;
+    const items = [];
+    for (let i = 0; i < count; i++) items.push(gen());
+    scene.add(mesh);
+    layers.push({ mesh, items });
+  };
+  // high thin cirrus drifts behind the cumulus deck
+  makeLayer(
+    cirrusTexture(),
+    new THREE.Color(1.35, 1.35, 1.42),
+    0.34,
+    4,
+    9,
+    () => ({
+      x: (rng() * 2 - 1) * 700,
+      y: 250 + rng() * 90,
+      z: (rng() * 2 - 1) * 700,
+      w: 300 + rng() * 240,
+      h: 30 + rng() * 26,
+      speed: 0.7 + rng() * 0.9,
+    }),
+  );
+  makeLayer(
+    cloudTexture(),
+    new THREE.Color(1.5, 1.42, 1.3), // warm-lit, reads through ACES
+    0.6,
+    5,
+    CLOUD_COUNT,
+    () => ({
       x: (rng() * 2 - 1) * 600,
       y: 140 + rng() * 110,
       z: (rng() * 2 - 1) * 600,
       w: 140 + rng() * 160,
       h: 45 + rng() * 40,
       speed: 2 + rng() * 2.5,
-    });
-  }
+    }),
+  );
   const m = new THREE.Matrix4();
   const update = (t) => {
-    items.forEach((c, i) => {
-      const x = ((((c.x + t * c.speed + 600) % 1200) + 1200) % 1200) - 600;
-      m.makeScale(c.w, c.h, 1);
-      m.setPosition(x, c.y, c.z);
-      clouds.setMatrixAt(i, m);
-    });
-    clouds.instanceMatrix.needsUpdate = true;
+    for (const { mesh, items } of layers) {
+      items.forEach((c, i) => {
+        const x = ((((c.x + t * c.speed + 600) % 1200) + 1200) % 1200) - 600;
+        m.makeScale(c.w, c.h, 1);
+        m.setPosition(x, c.y, c.z);
+        mesh.setMatrixAt(i, m);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+    }
   };
   update(0);
-  scene.add(clouds);
   return update;
 }
 

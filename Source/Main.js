@@ -9,6 +9,7 @@ import { createVegetation } from "./World/Vegetation.js";
 import { createBuildings } from "./World/Buildings.js";
 import { createClutter } from "./World/Clutter.js";
 import { AudioAmbience } from "./World/AudioAmbience.js";
+import { Weather } from "./World/Weather.js";
 import { Player } from "./Player/Player.js";
 
 const SEED = 7;
@@ -66,7 +67,7 @@ scene.add(terrain.mesh);
 const water = createWater(terrain.heightTex);
 scene.add(water.mesh);
 await new Promise((r) => setTimeout(r));
-const veg = createVegetation(hf, terrain.heightTex, renderer);
+const veg = createVegetation(hf, terrain.heightTex, renderer, sky.sunDir);
 scene.add(veg.group);
 await new Promise((r) => setTimeout(r));
 const buildings = createBuildings(hf);
@@ -79,6 +80,7 @@ const postFx = createPostFx(renderer, scene, camera, {
 });
 const input = new Input(renderer.domElement);
 const audio = new AudioAmbience();
+const weather = new Weather(scene, sky.sun, scene.fog);
 
 // spawn near the first cabin, facing the world center, on validated clear ground
 const home = hf.sites[0] ?? { x: 0, z: 0 };
@@ -195,9 +197,10 @@ renderer.setAnimationLoop(() => {
   last = now;
   elapsed += dt;
   if (input.locked) player.update(dt);
+  weather.update(dt, player.pos);
   water.update(dt);
   terrain.update(elapsed);
-  veg.update(elapsed, player.pos);
+  veg.update(elapsed, player.pos, weather.gust);
   if (sky.update(player.pos, elapsed)) renderer.shadowMap.needsUpdate = true;
   audio.update(dt, hf.streamDist(player.pos.x, player.pos.z));
   if (statsHud) {
@@ -208,7 +211,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // debug handle for automated smoke tests
-window.HN = { player, hf, scene, renderer, camera, veg };
+window.HN = { player, hf, scene, renderer, camera, veg, weather };
 const tp = new URLSearchParams(location.search).get("tp");
 if (tp) {
   const [x, z, yaw] = tp.split(",").map(Number);
